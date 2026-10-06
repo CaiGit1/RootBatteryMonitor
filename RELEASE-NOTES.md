@@ -68,19 +68,28 @@ adb install -r RootBatteryMonitor-1.2.0.apk
 
 ## 关于签名
 
-- 若 Release 附件名为 `app-release.apk`，则为**发布密钥签名**，可覆盖安装此前的正式版
-- 若为 `app-debug.apk`，则是 CI 在**未配置密钥库**时的回退产物：可直接安装，但**无法覆盖**已安装的正式签名包
+Release 附件一律为**发布密钥签名**（`CN=Root Battery Monitor, OU=CaiGit1`），可覆盖安装此前的正式版。
 
-要让 CI 自动产出正式签名包，在仓库 Secrets 中配置以下四项即可（本仓库的 `release.yml` 会自动识别）：
+自动发布工作流在**未配置密钥库时会直接失败、拒绝发布** —— 因为 debug 签名（`CN=Android Debug`）与正式密钥是两把完全不同的钥匙，发出去只会让使用者遇到签名冲突、无法覆盖更新。宁可不发，也不发一个签名不对的包。
+
+要启用自动发布，在仓库 **Settings → Secrets and variables → Actions** 中添加以下四项：
 
 | Secret | 内容 |
 |---|---|
-| `KEYSTORE_BASE64` | 密钥库文件的 base64：`base64 -w0 release.jks` |
+| `KEYSTORE_BASE64` | 密钥库文件的 base64（见下方生成命令） |
 | `KEYSTORE_PASSWORD` | `storePassword` |
 | `KEY_ALIAS` | `keyAlias` |
 | `KEY_PASSWORD` | `keyPassword` |
 
+生成 `KEYSTORE_BASE64`（PowerShell，直接把结果放进剪贴板，不经过屏幕）：
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\Users\Yanami\.android-keystore\rootbattery-release.jks")) | Set-Clipboard
+```
+
 > ⚠️ 密钥库丢失将**无法对已安装的包做覆盖更新**，请离线备份 `.jks` 与口令。
+>
+> ⚠️ 若把密钥库放进 Secrets，请确认该仓库的 Secrets 访问范围与协作者权限；不愿托管密钥的话，退回「本地 `assembleRelease` 后手动上传附件」即可。
 
 ## 安全边界
 
