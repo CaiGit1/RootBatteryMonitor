@@ -1,10 +1,15 @@
 name: Release
 
 # 推送 v* 标签即自动构建并发布 GitHub Release（用内置 GITHUB_TOKEN，无需个人令牌）。
+# 也支持手动触发并指定标签，便于在补配 Secrets 后重发既有版本。
 on:
   push:
     tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的标签（例如 v1.2.0）'
+        required: true
 
 jobs:
   release:
@@ -12,6 +17,10 @@ jobs:
     permissions:
       # 创建 Release 与上传附件需要写权限；其余保持只读
       contents: write
+    env:
+      # 标签推送时取标签名；手动触发时取输入值。
+      # 注意不能直接用 GITHUB_REF_NAME —— 手动触发时它是分支名，会建出名为 "main" 的 Release。
+      TAG: ${{ inputs.tag || github.ref_name }}
 
     steps:
       - name: Checkout
@@ -84,7 +93,7 @@ jobs:
         run: |
           SRC=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
           if [ -z "$SRC" ]; then echo "没有找到 release APK 产物" >&2; exit 1; fi
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           OUT="RootBatteryMonitor-${VERSION}.apk"
           cp "$SRC" "$OUT"
           echo "path=$OUT" >> "$GITHUB_OUTPUT"
@@ -105,7 +114,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
           VERSION="${{ steps.apk.outputs.version }}"
           APK="${{ steps.apk.outputs.path }}"
 
