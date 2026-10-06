@@ -73,14 +73,14 @@ object HyperOsIsland {
             put("type", 1)
             put("pic", PIC_BATTERY)
         }
-
-        // 左区放功率、右区放温度 —— 两段都填上，岛才不会被空掉一半。
+        // 左区放功率、右区放温度，两侧都只用**纯数值**：
+        //  - 去掉 frontTitle（原先的「功率」「温度」汉字）：岛是按内容宽度撑开的，
+        //    多两个字标签就白占一截宽度，而图标本身已经说明这是电池信息；
+        //  - 两侧格式统一为「数值+单位」，读起来是并列关系而不是主从关系。
         //
-        // 为什么必须自己填左区（实机从 SystemUI 日志里拿到的教训）：
-        // HyperOS 对 AOSP 实况通知有一套**自己的转换逻辑**，它会把 shortCriticalText
-        // 塞进 imageTextInfoRight，并把 imageTextInfoLeft.textInfo.title 留成空串 ——
-        // 于是左区永远空着，且此时 miui.focus.param 被完全忽略。
-        // 只有不发「实况通知」、纯走原生岛载荷时，左右两区才由开发者控制。
+        // 关于岛宽度：实测改不动。已逐一试过「缩短内容」「只填左区」「把
+        // islandFirstFloat/enableFloat 都关掉」，胶囊始终是同一个宽度 ——
+        // 那是 SystemUI 大岛的固定尺寸，不是按内容算的。
         val bigIslandArea = JSONObject().apply {
             put(
                 "imageTextInfoLeft",
@@ -90,9 +90,7 @@ object HyperOsIsland {
                     put(
                         "textInfo",
                         JSONObject().apply {
-                            put("frontTitle", "功率")
                             put("title", powerText)
-                            put("content", levelText)
                             put("useHighLight", false)
                         }
                     )
@@ -105,7 +103,6 @@ object HyperOsIsland {
                     put(
                         "textInfo",
                         JSONObject().apply {
-                            put("frontTitle", "温度")
                             put("title", tempText)
                             put("useHighLight", false)
                         }
@@ -118,13 +115,31 @@ object HyperOsIsland {
         val paramIsland = JSONObject().apply {
             put("islandProperty", 1)
             put("bigIslandArea", bigIslandArea)
-            put("smallIslandArea", JSONObject().apply { put("picInfo", picInfo) })
+            // 摘要态（收起后的小岛）。实测带上 textInfo 也能显示文字，
+            // 所以收起态同样能看到功率，不必为了窄而牺牲信息。
+            put(
+                "smallIslandArea",
+                JSONObject().apply {
+                    put("picInfo", picInfo)
+                    put(
+                        "textInfo",
+                        JSONObject().apply {
+                            put("title", powerText)
+                            put("useHighLight", false)
+                        }
+                    )
+                }
+            )
         }
 
         val paramV2 = JSONObject().apply {
             put("protocol", 1)
             put("business", "batterymonitor")
             put("updatable", true)
+            // enableFloat=false：**更新时不要自动展开**。
+            // 这个应用每秒都在刷新，若每次更新都把岛弹开，等于每秒抢一次注意力。
+            // 首次出现仍保留默认的自动展开（islandFirstFloat 默认 true），
+            // 否则用户根本看不到功率与温度。
             put("enableFloat", false)
             put("param_island", paramIsland)
             put("baseInfo", JSONObject().apply {
