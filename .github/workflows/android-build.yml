@@ -22,19 +22,49 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # runner 镜像自带的 Android SDK 平台版本不固定，显式安装以保证构建可复现。
-      # 工程要求 compileSdk 35 / build-tools 34.0.0（AGP 8.6.0 默认值）。
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      # runner 镜像自带的 SDK 平台版本会随镜像漂移，而本工程要求
+      # compileSdk 35 / build-tools 34.0.0，缺包会直接构建失败，故显式装齐。
+      #
+      # 三点讲究：
+      #  1. 先显式接受许可 —— 未接受时 sdkmanager --install 会直接非零退出
+      #  2. 显式传 --sdk_root —— 否则在 ANDROID_SDK_ROOT/ANDROID_HOME 不一致的
+      #     镜像上会报 "Could not determine SDK root"
+      #  3. 回退到 ANDROID_HOME —— 部分镜像只设了后者
       - name: Install required SDK packages
         run: |
-          sdkmanager --install "platforms;android-35" "build-tools;34.0.0" "platform-tools"
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          yes | sdkmanager --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
+          sdkmanager --sdk_root="$SDK" \
+            "platforms;android-35" \
+            "build-tools;34.0.0" \
+            "platform-tools"
+
+      # 环境快照。构建失败时，这一段能直接区分「环境没装对」还是「代码编译不过」——
+      # 没有它，失败日志只能靠猜。
+      - name: Print toolchain info
+        run: |
+          echo "===== Java ====="
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "===== Android SDK ====="
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "resolved SDK=$SDK"
+          sdkmanager --version || true
+          echo "--- platforms ---"
+          ls -1 "$SDK/platforms" 2>/dev/null || echo "(none)"
+          echo "--- build-tools ---"
+          ls -1 "$SDK/build-tools" 2>/dev/null || echo "(none)"
+          echo "===== Gradle wrapper ====="
+          chmod +x ./gradlew
+          ./gradlew --version
 
       - name: Build Debug APK
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
