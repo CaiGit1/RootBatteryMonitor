@@ -63,6 +63,15 @@ class SettingsStore(context: Context) {
         }
         set(v) = prefs.edit().putString(KEY_OVERLAY_BG, v.name).apply()
 
+    /**
+     * 悬浮窗勿扰（锁定）模式。
+     * 开启后给窗口加 FLAG_NOT_TOUCHABLE：触摸直接穿透到下层应用，
+     * 既不能拖动，也不能双击唤起本应用 —— 适合长期挂机时防止误触。
+     */
+    var overlayLocked: Boolean
+        get() = prefs.getBoolean(KEY_OVERLAY_LOCKED, false)
+        set(v) = prefs.edit().putBoolean(KEY_OVERLAY_LOCKED, v).apply()
+
     /** 深色模式策略：跟随系统 / 始终浅色 / 始终深色 */
     var themeMode: ThemeMode
         get() {
@@ -89,6 +98,7 @@ class SettingsStore(context: Context) {
         private const val KEY_OVERLAY_ALPHA = "overlay_alpha"
         private const val KEY_OVERLAY_BG = "overlay_background"
         private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_OVERLAY_LOCKED = "overlay_locked"
 
         /** 0.2s 起，0.1s 步进 */
         const val MIN_INTERVAL_MS = 200L

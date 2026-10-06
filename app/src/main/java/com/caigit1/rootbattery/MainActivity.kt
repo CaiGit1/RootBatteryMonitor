@@ -13,12 +13,23 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +44,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,10 +53,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -61,6 +75,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -78,6 +93,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
@@ -93,10 +109,17 @@ class MainActivity : ComponentActivity() {
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /** 双击悬浮窗唤起时置位；界面消费掉后复位。 */
+    private val openOverlaySettings = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Android 15（targetSdk 35）已强制 edge-to-edge。
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        openOverlaySettings.value =
+            intent?.getBooleanExtra(EXTRA_OPEN_OVERLAY_SETTINGS, false) == true
+
         requestNotificationPermissionIfNeeded()
         setContent {
             val vm: BatteryMonitorViewModel = viewModel(factory = BatteryMonitorViewModel.Factory)
@@ -118,8 +141,22 @@ class MainActivity : ComponentActivity() {
             }
 
             RootBatteryMonitorTheme(themeMode = ui.themeMode) {
-                AppRoot(vm, ui)
+                AppRoot(
+                    vm = vm,
+                    ui = ui,
+                    openOverlaySettings = openOverlaySettings.value,
+                    onOpenOverlaySettingsHandled = { openOverlaySettings.value = false }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // 应用已在后台时再次双击悬浮窗：走这里而不是 onCreate
+        if (intent.getBooleanExtra(EXTRA_OPEN_OVERLAY_SETTINGS, false)) {
+            openOverlaySettings.value = true
         }
     }
 
@@ -135,13 +172,23 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
+
+    companion object {
+        /** 双击悬浮窗时带过来的标记：进入应用后直接跳到悬浮窗设置。 */
+        const val EXTRA_OPEN_OVERLAY_SETTINGS = "open_overlay_settings"
+    }
 }
 
 private val PAGE_TITLES = listOf("概览", "详情", "曲线", "设置")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun AppRoot(vm: BatteryMonitorViewModel, ui: BatteryMonitorUiState) {
+private fun AppRoot(
+    vm: BatteryMonitorViewModel,
+    ui: BatteryMonitorUiState,
+    openOverlaySettings: Boolean,
+    onOpenOverlaySettingsHandled: () -> Unit
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { PAGE_TITLES.size })
@@ -153,6 +200,18 @@ private fun AppRoot(vm: BatteryMonitorViewModel, ui: BatteryMonitorUiState) {
 
     // 「关于」是设置页下的子页面：用局部状态做钻取即可，不必为此引入导航库
     var aboutVisible by remember { mutableStateOf(false) }
+
+    // 双击悬浮窗唤起时，除了切到设置页，还要滚到悬浮窗外观那一张卡
+    var scrollSettingsToOverlay by remember { mutableStateOf(false) }
+
+    LaunchedEffect(openOverlaySettings) {
+        if (openOverlaySettings) {
+            aboutVisible = false
+            scrollSettingsToOverlay = true
+            pagerState.animateScrollToPage(PAGE_TITLES.lastIndex)
+            onOpenOverlaySettingsHandled()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -212,7 +271,11 @@ private fun AppRoot(vm: BatteryMonitorViewModel, ui: BatteryMonitorUiState) {
                     .padding(padding)
             ) { page ->
                 when (page) {
-                    0 -> OverviewPage(ui, onRefresh = vm::refreshNow)
+                    0 -> OverviewPage(
+                        ui = ui,
+                        onRefresh = vm::refreshNow,
+                        onOpenDetails = { scope.launch { pagerState.animateScrollToPage(1) } }
+                    )
                     1 -> DetailsPage(ui, onSelfCheck = vm::runSelfCheck)
                     2 -> ChartsPage(ui)
                     else -> SettingsPage(
@@ -224,7 +287,10 @@ private fun AppRoot(vm: BatteryMonitorViewModel, ui: BatteryMonitorUiState) {
                         onOverlayFieldChange = vm::setOverlayField,
                         onOverlayAlphaChange = vm::setOverlayAlpha,
                         onOverlayBackgroundChange = vm::setOverlayBackground,
+                        onOverlayLockedChange = vm::setOverlayLocked,
                         onThemeModeChange = vm::setThemeMode,
+                        scrollToOverlay = scrollSettingsToOverlay,
+                        onOverlayScrollHandled = { scrollSettingsToOverlay = false },
                         onSelfCheck = vm::runSelfCheck,
                         onOpenAbout = { aboutVisible = true },
                         onOpenOverlaySettings = {
@@ -277,7 +343,11 @@ private fun TrendTabIcon(tint: Color) {
 // ══════════════════════════ 概览 ══════════════════════════
 
 @Composable
-private fun OverviewPage(ui: BatteryMonitorUiState, onRefresh: () -> Unit) {
+private fun OverviewPage(
+    ui: BatteryMonitorUiState,
+    onRefresh: () -> Unit,
+    onOpenDetails: () -> Unit
+) {
     val snap = ui.latest
     LazyColumn(
         modifier = Modifier
@@ -297,16 +367,16 @@ private fun OverviewPage(ui: BatteryMonitorUiState, onRefresh: () -> Unit) {
             // 两列小卡片：简单易读，需要细节时切到「详情」页
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("温度", snap?.temperatureText ?: "--", Modifier.weight(1f))
-                    StatTile("电压", snap?.voltageText ?: "--", Modifier.weight(1f))
+                    StatTile("温度", snap?.temperatureText ?: "--", Modifier.weight(1f), onOpenDetails)
+                    StatTile("电压", snap?.voltageText ?: "--", Modifier.weight(1f), onOpenDetails)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("电流", snap?.currentText ?: "--", Modifier.weight(1f))
-                    StatTile("功率", snap?.computedPowerText ?: "--", Modifier.weight(1f))
+                    StatTile("电流", snap?.currentText ?: "--", Modifier.weight(1f), onOpenDetails)
+                    StatTile("功率", snap?.computedPowerText ?: "--", Modifier.weight(1f), onOpenDetails)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("健康度", snap?.healthPercentText ?: "--", Modifier.weight(1f))
-                    StatTile("循环次数", snap?.cycleCount?.toString() ?: "--", Modifier.weight(1f))
+                    StatTile("健康度", snap?.healthPercentText ?: "--", Modifier.weight(1f), onOpenDetails)
+                    StatTile("循环次数", snap?.cycleCount?.toString() ?: "--", Modifier.weight(1f), onOpenDetails)
                 }
             }
         }
@@ -414,8 +484,13 @@ private fun LevelCard(snapshot: BatterySnapshot?) {
 }
 
 @Composable
-private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier = modifier) {
+private fun StatTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    AppCard(modifier = modifier, onClick = onClick) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -529,6 +604,15 @@ private fun DetailsPage(ui: BatteryMonitorUiState, onSelfCheck: () -> Unit) {
     }
 }
 
+/**
+ * 可展开分组。
+ *
+ * **整张卡片**都可点（之前只有右侧那几像素文字可点，触控目标太小、也不明显），
+ * 并配一个会旋转的箭头 + 水波纹反馈。
+ *
+ * 展开过程不是"瞬间出现"：用 [AnimatedVisibility] 做 spring 垂直展开 + 淡入，
+ * 收起则用阻尼更大的 spring 快速收拢（展开要"弹"，收起要"利落"）。
+ */
 @Composable
 private fun ExpandableSection(
     title: String,
@@ -536,26 +620,41 @@ private fun ExpandableSection(
     content: @Composable ColumnScope.() -> Unit
 ) {
     var expanded by remember { mutableStateOf(initiallyExpanded) }
-    Card {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    if (expanded) "收起" else "展开",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
+
+    AppCard(onClick = { expanded = !expanded }) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            ExpandIndicator(expanded)
+        }
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(
+                expandFrom = Alignment.Top,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
                 )
-            }
-            if (expanded) {
-                Spacer(Modifier.height(6.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
-            }
+            ) + fadeIn(animationSpec = tween(durationMillis = 160)),
+            exit = shrinkVertically(
+                shrinkTowards = Alignment.Top,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            ) + fadeOut(animationSpec = tween(durationMillis = 110))
+        ) {
+            Column(
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                content = content
+            )
         }
     }
 }
@@ -591,27 +690,42 @@ private fun SelfCheckCard(checks: List<SelfCheckItem>) {
 @Composable
 private fun RawUeventCard(raw: Map<String, String>) {
     var expanded by remember { mutableStateOf(false) }
-    Card {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded },
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+
+    AppCard(onClick = { expanded = !expanded }) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "原始 uevent（${raw.size} 项）",
+                style = MaterialTheme.typography.titleSmall
+            )
+            ExpandIndicator(expanded)
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(
+                expandFrom = Alignment.Top,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + fadeIn(animationSpec = tween(durationMillis = 160)),
+            exit = shrinkVertically(
+                shrinkTowards = Alignment.Top,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            ) + fadeOut(animationSpec = tween(durationMillis = 110))
+        ) {
+            Column(
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    "原始 uevent（${raw.size} 项）",
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    if (expanded) "收起" else "展开",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-            if (expanded) {
-                Spacer(Modifier.height(6.dp))
                 raw.toSortedMap().forEach { (key, value) ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -860,6 +974,15 @@ private fun MetricChart(
 
 // ══════════════════════════ 设置 ══════════════════════════
 
+/**
+ * 设置页里「悬浮窗外观」卡片的 item 下标 —— 双击悬浮窗唤起时滚到这里。
+ *
+ * LazyColumn 的 item 顺序就是下面 `item {}` 的书写顺序，**改动顺序时必须同步这个常量**。
+ * 当前顺序：0 刷新间隔 / 1 深色模式 / 2 后台与悬浮窗 / 3 悬浮窗显示字段 /
+ *          4 悬浮窗外观 / 5 其他 / 6 使用说明 / 7 关于 / 8 Spacer
+ */
+private const val SETTINGS_ITEM_OVERLAY_APPEARANCE = 4
+
 @Composable
 private fun SettingsPage(
     ui: BatteryMonitorUiState,
@@ -870,7 +993,10 @@ private fun SettingsPage(
     onOverlayFieldChange: (OverlayField, Boolean) -> Unit,
     onOverlayAlphaChange: (Float) -> Unit,
     onOverlayBackgroundChange: (OverlayBackground) -> Unit,
+    onOverlayLockedChange: (Boolean) -> Unit,
     onThemeModeChange: (ThemeMode) -> Unit,
+    scrollToOverlay: Boolean,
+    onOverlayScrollHandled: () -> Unit,
     onSelfCheck: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenOverlaySettings: () -> Unit
@@ -881,7 +1007,16 @@ private fun SettingsPage(
     val alphaSteps =
         ((1f - SettingsStore.MIN_OVERLAY_ALPHA) / SettingsStore.OVERLAY_ALPHA_STEP - 1).roundToInt()
 
+    val listState = rememberLazyListState()
+    LaunchedEffect(scrollToOverlay) {
+        if (scrollToOverlay) {
+            listState.animateScrollToItem(SETTINGS_ITEM_OVERLAY_APPEARANCE)
+            onOverlayScrollHandled()
+        }
+    }
+
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 12.dp),
@@ -1069,6 +1204,19 @@ private fun SettingsPage(
                         "背景取自 Material You 动态色板（跟随壁纸），并随明暗模式切换。\n" +
                             "调低可减少对下方内容的遮挡；文字始终保持不透明，避免低不透明度下读不清。"
                     )
+
+                    Spacer(Modifier.height(2.dp))
+
+                    SwitchRow(
+                        title = "勿扰模式（锁定悬浮窗）",
+                        subtitle = "触摸直接穿透到下层应用：不能拖动，也不能双击唤起本应用",
+                        checked = ui.overlayLocked,
+                        onChange = onOverlayLockedChange
+                    )
+
+                    if (ui.overlayLocked) {
+                        Hint("已锁定。想解除请回到本页关闭；锁定期间悬浮窗标题会显示 🔒。")
+                    }
                 }
             }
         }
@@ -1109,11 +1257,10 @@ private fun SettingsPage(
         }
 
         item {
-            Card {
+            AppCard(onClick = onOpenAbout) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = onOpenAbout)
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -1336,6 +1483,79 @@ private fun LinkRow(label: String, value: String, onClick: () -> Unit) {
 }
 
 // ══════════════════════════ 通用 ══════════════════════════
+
+/**
+ * 带点按反馈的卡片。
+ *
+ * 按下用 spring 轻微缩小、松手弹回 —— 与悬浮窗的缩放反馈是同一套手感。
+ * 不可点的卡片（[onClick] 为 null）不加动画：没有任何动作却会动，
+ * 反而让人误以为能点。
+ */
+@Composable
+private fun AppCard(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    colors: CardColors = CardDefaults.cardColors(),
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.975f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "cardPressScale"
+    )
+
+    Card(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interaction,
+                        indication = ripple()
+                    ) { onClick() }
+                } else {
+                    Modifier
+                }
+            ),
+        colors = colors,
+        content = content
+    )
+}
+
+/** 展开 / 收起指示：文字 + 会旋转的箭头，整块都是触控目标。 */
+@Composable
+private fun ExpandIndicator(expanded: Boolean) {
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "expandArrow"
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (expanded) "收起" else "展开",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.width(2.dp))
+        Icon(
+            imageVector = Icons.Filled.KeyboardArrowDown,
+            contentDescription = if (expanded) "收起" else "展开",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .size(22.dp)
+                .graphicsLayer { rotationZ = rotation }
+        )
+    }
+}
+
 
 @Composable
 private fun ErrorBanner(message: String) {

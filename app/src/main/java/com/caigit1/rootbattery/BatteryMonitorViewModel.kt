@@ -40,6 +40,8 @@ data class BatteryMonitorUiState(
     val overlayAlpha: Float = SettingsStore.DEFAULT_OVERLAY_ALPHA,
     /** 悬浮窗背景取色角色 */
     val overlayBackground: OverlayBackground = OverlayBackground.DEFAULT,
+    /** 悬浮窗勿扰（锁定）模式：不可互动、不可双击唤起应用 */
+    val overlayLocked: Boolean = false,
     val overlayPermissionGranted: Boolean = false
 ) {
     val serviceRunning: Boolean get() = notificationEnabled || overlayEnabled
@@ -81,6 +83,7 @@ class BatteryMonitorViewModel(
                 themeMode = settings.themeMode,
                 overlayAlpha = settings.overlayAlpha,
                 overlayBackground = settings.overlayBackground,
+                overlayLocked = settings.overlayLocked,
                 overlayPermissionGranted = canDrawOverlays()
             )
         }
@@ -192,6 +195,14 @@ class BatteryMonitorViewModel(
         syncService()
     }
 
+    /** 悬浮窗勿扰（锁定）模式。 */
+    fun setOverlayLocked(locked: Boolean) {
+        if (locked == _uiState.value.overlayLocked) return
+        settings.overlayLocked = locked
+        _uiState.update { it.copy(overlayLocked = locked) }
+        syncService()
+    }
+
     /** 从系统设置返回后刷新权限状态 */
     fun refreshOverlayPermission() {
         _uiState.update { it.copy(overlayPermissionGranted = canDrawOverlays()) }
@@ -237,7 +248,8 @@ class BatteryMonitorViewModel(
                         overlayFields = s.overlayFields,
                         overlayAlpha = s.overlayAlpha,
                         overlayBackground = s.overlayBackground,
-                        themeMode = s.themeMode
+                        themeMode = s.themeMode,
+                        overlayLocked = s.overlayLocked
                     )
                 )
             } else {
