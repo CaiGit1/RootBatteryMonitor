@@ -20,7 +20,16 @@ import kotlinx.coroutines.launch
 private const val MAX_TREND_POINTS = 600
 
 data class BatteryMonitorUiState(
-    val rootReady: Boolean = false,
+    /**
+     * 数据来源。
+     *
+     * 早先这里是个 `rootReady: Boolean`，界面据此显示「Root 可用 / Root 未就绪」——
+     * 加了免 root 模式之后这个二值状态就不成立了：没有 root 也不代表读不到数据，
+     * 只代表字段少一些。
+     */
+    val dataSource: DataSource = DataSource.ROOT,
+    /** 能否读到数据。两种模式都能读，读不到（未授权、节点异常）时才为 false */
+    val dataReady: Boolean = false,
     val selfChecks: List<SelfCheckItem> = emptyList(),
     val latest: BatterySnapshot? = null,
     val history: List<TrendPoint> = emptyList(),
@@ -76,7 +85,10 @@ class BatteryMonitorViewModel(
                 if (modelClass.isAssignableFrom(BatteryMonitorViewModel::class.java)) {
                     val application =
                         checkNotNull(extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
-                    return BatteryMonitorViewModel(application, BatteryMonitorRepository()) as T
+                    return BatteryMonitorViewModel(
+                        application,
+                        BatteryMonitorRepository(application)
+                    ) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
             }
@@ -127,12 +139,14 @@ class BatteryMonitorViewModel(
     fun runSelfCheck() {
         viewModelScope.launch {
             val checks = repository.selfCheck()
+            val ready = checks.firstOrNull()?.ok == true
             _uiState.update {
                 it.copy(
                     selfChecks = checks,
-                    rootReady = checks.firstOrNull()?.ok == true,
+                    dataSource = if (repository.isSystemMode) DataSource.SYSTEM else DataSource.ROOT,
+                    dataReady = ready,
                     // 自检成功时清掉陈旧的错误横幅，失败时保留由刷新路径写入的错误
-                    error = if (checks.firstOrNull()?.ok == true) null else it.error
+                    error = if (ready) null else it.error
                 )
             }
         }
@@ -317,10 +331,23 @@ class BatteryMonitorViewModel(
         when (result) {
             is MonitorResult.Success -> _uiState.update { state ->
                 val merged = (state.history + result.snapshot.toTrendPoint()).takeLast(MAX_TREND_POINTS)
-                state.copy(latest = result.snapshot, history = merged, error = null)
+                state.copy(
+                    latest = result.snapshot,
+                    history = merged,
+                    error = null,
+                    // 以快照自报的来源为准，而不是另查一次仓库状态
+                    dataSource = result.snapshot.source,
+                    dataReady = true
+                )
             }
 
-            is MonitorResult.Error -> _uiState.update { it.copy(error = result.error) }
+            is MonitorResult.Error -> _uiState.update {
+                it.copy(
+                    error = result.error,
+                    dataReady = false,
+                    dataSource = if (repository.isSystemMode) DataSource.SYSTEM else DataSource.ROOT
+                )
+            }
         }
     }
 }

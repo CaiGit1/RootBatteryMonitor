@@ -20,6 +20,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 /**
@@ -50,7 +53,7 @@ class BatteryMonitorService : Service() {
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val repository = BatteryMonitorRepository()
+    private val repository = BatteryMonitorRepository(this)
     private val config = MutableStateFlow(ServiceConfig())
 
     private lateinit var overlay: FloatingOverlay
@@ -237,9 +240,31 @@ class BatteryMonitorService : Service() {
             buildNotification(
                 compact,
                 liveText = expanded.takeIf { cfg.liveUpdateEnabled },
-                islandJson = islandJson
+                islandJson = islandJson,
+                chipText = chipTextOf(snapshot).takeIf { cfg.liveUpdateEnabled }
             )
         )
+    }
+
+    /**
+     * 状态栏胶囊用的极短文本，形如 `-1.3W·33°`。
+     *
+     * 实测（AOSP Android 17）胶囊的字符预算卡在 **9 个字符**上，且是硬边界：
+     *  `-1.3W 33°`（9）正常显示，`-829mW 33°`（10）系统一个字都不渲染，只剩图标。
+     * 连拍 6 帧与日志逐条对得上，与刷新频率无关（0.2s 最快档位同样成立）。
+     *
+     * 因此单位固定为瓦、不随量级切换（切到 mW 会让长度多一位直接越界），
+     * 温度取整，分隔符用中点而不是空格，正好 9 字符。
+     * 代价是毫瓦级精度只在通知正文里保留，胶囊四舍五入到 0.1W。
+     */
+    private fun chipTextOf(snapshot: BatterySnapshot): String {
+        val power = snapshot.computedPowerMw?.let { mw ->
+            val watts = mw / 1000.0
+            val sign = if (watts > 0) "+" else if (watts < 0) "-" else ""
+            "$sign${String.format(Locale.US, "%.1f", abs(watts))}W"
+        }
+        val temp = snapshot.temperatureCelsius?.let { "${it.roundToInt()}°" }
+        return listOfNotNull(power, temp).joinToString("·")
     }
 
     private fun maybeNotifyError(cfg: ServiceConfig, error: MonitorError) {
@@ -293,7 +318,8 @@ class BatteryMonitorService : Service() {
     private fun buildNotification(
         content: String,
         liveText: String? = null,
-        islandJson: String? = null
+        islandJson: String? = null,
+        chipText: String? = null
     ): Notification {
         val openApp = PendingIntent.getActivity(
             this,
@@ -331,7 +357,9 @@ class BatteryMonitorService : Service() {
         if (liveText != null && Build.VERSION.SDK_INT >= API_36 && !useNativeIsland) {
             builder.setStyle(Notification.BigTextStyle().bigText(liveText))
             builder.extras.putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
-            applyShortCriticalText(builder, content)
+            // 胶囊有独立的极短文本：状态栏那个胶囊只有几十 dp 宽，
+            // 实测「+138 mW  ·  32.2°C」这种长度系统干脆一个字都不渲染，只剩图标。
+            applyShortCriticalText(builder, chipText ?: content)
         }
 
         val notification = builder.build()

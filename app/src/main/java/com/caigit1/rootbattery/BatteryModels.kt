@@ -116,10 +116,20 @@ private fun describeUsbProtocol(key: String): String = when (key.uppercase()) {
     else -> key
 }
 
+/**
+ * 数据来源。
+ *
+ * [ROOT] 直读内核 sysfs，字段最全；
+ * [SYSTEM] 免 root，只用系统公开 API，拿不到充电协议、满电/设计容量与原始 uevent。
+ */
+enum class DataSource { ROOT, SYSTEM }
+
 data class BatterySnapshot(
     val timestampMs: Long,
     /** 实际读取的节点路径，便于排障 */
     val sourcePath: String? = null,
+    /** 数据来源；免 root 模式下界面会标注哪些指标不可用 */
+    val source: DataSource = DataSource.ROOT,
 
     // ── 标识与状态 ──
     val name: String? = null,

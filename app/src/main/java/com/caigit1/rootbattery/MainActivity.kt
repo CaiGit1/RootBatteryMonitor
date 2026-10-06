@@ -357,10 +357,17 @@ private fun OverviewPage(
             .padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item { RootStatusRow(ui.rootReady) }
+        item { DataSourceRow(ui.dataSource, ui.dataReady) }
 
         ui.error?.let { err ->
             item { ErrorBanner(err.message) }
+        }
+
+        // 免 root 模式下说清哪些指标拿不到，免得用户以为是应用坏了
+        if (snap?.source == DataSource.SYSTEM) {
+            item {
+                Hint("充电协议、满电/设计容量（健康度）与原始 uevent 需要 root。")
+            }
         }
 
         item { LevelCard(snap) }
@@ -418,10 +425,20 @@ private fun OverviewPage(
     }
 }
 
+/**
+ * 顶部状态行：说明数据是从哪来的。
+ *
+ * 不是「root 可用 / 未就绪」这种二值判断 —— 免 root 模式下没有 root 照样有数据，
+ * 只是字段少一些，用红色示警反而是错的。
+ */
 @Composable
-private fun RootStatusRow(rootReady: Boolean) {
+private fun DataSourceRow(source: DataSource, dataReady: Boolean) {
     val semantic = LocalSemanticColors.current
-    val color = if (rootReady) semantic.ok else semantic.error
+    val (color, label) = when {
+        !dataReady -> semantic.error to "读取失败"
+        source == DataSource.SYSTEM -> MaterialTheme.colorScheme.tertiary to "免 root 模式"
+        else -> semantic.ok to "Root 直读"
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -432,10 +449,7 @@ private fun RootStatusRow(rootReady: Boolean) {
                 .size(10.dp)
                 .background(color, CircleShape)
         )
-        Text(
-            if (rootReady) "Root 可用" else "Root 未就绪",
-            fontWeight = FontWeight.Bold
-        )
+        Text(label, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1296,7 +1310,8 @@ private fun SettingsPage(
                 ) {
                     Text("使用说明", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "• 所有读取都在 root 上下文完成，仅执行只读命令，不写入 sysfs\n" +
+                        "• 有 root 时直读内核 sysfs，字段最全；无 root 时自动改用系统公开 API，字段较少\n" +
+                            "• 读取都是只读的，不写入 sysfs\n" +
                             "• 应用未声明 INTERNET 权限，不联网、不上传\n" +
                             "• 高频刷新会明显增加耗电，长时间挂悬浮窗建议用 1s 以上间隔",
                         style = MaterialTheme.typography.bodySmall
@@ -1443,8 +1458,8 @@ private fun AboutPage(modifier: Modifier = Modifier) {
                     }
 
                     Text(
-                        "仅支持已 root 设备的电池监控应用。通过只读读取内核 power_supply 的 " +
-                            "uevent 节点，展示电量、温度、电压、电流、功率、容量损耗与充电器状态。",
+                        "读取内核 power_supply 节点展示电池状态，展示电量、温度、电压、电流、" +
+                            "功率、容量损耗与充电器状态。有 root 时直读 sysfs，无 root 时改用系统公开 API。",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -1501,7 +1516,8 @@ private fun AboutPage(modifier: Modifier = Modifier) {
                 ) {
                     Text("权限与安全边界", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "• 所有读取均在 root 上下文完成，仅执行只读命令，不写入 sysfs\n" +
+                        "• 有 root 时在 root 上下文只读读取 sysfs；无 root 时只用系统公开 API，不请求任何额外权限\n" +
+                            "• 任何情况下都不写入 sysfs\n" +
                             "• 未声明 INTERNET 权限，不联网、不上传任何数据\n" +
                             "• 悬浮窗需要「显示在其他应用上层」，由用户手动授予",
                         style = MaterialTheme.typography.bodySmall

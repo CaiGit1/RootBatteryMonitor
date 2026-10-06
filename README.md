@@ -3,9 +3,13 @@
 [![Android Build](https://github.com/CaiGit1/RootBatteryMonitor/actions/workflows/android-build.yml/badge.svg)](https://github.com/CaiGit1/RootBatteryMonitor/actions/workflows/android-build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-读取内核 `power_supply` 节点、展示电池状态的 Android 应用，需要 root。
+展示电池状态的 Android 应用。
 
-数据只在本机显示。只用 root 执行只读命令读取 sysfs，不写入，也不申请网络权限。
+有 root 时直读内核 `power_supply` 节点，字段最全；没有 root 时自动改用系统公开 API，
+仍能显示电量、温度、电压、电流、功率、充电状态与循环次数，充电协议、健康度与原始
+uevent 需要 root。
+
+数据只在本机显示，不做任何网络请求。
 
 APK 见 [Releases](https://github.com/CaiGit1/RootBatteryMonitor/releases)。
 
@@ -36,8 +40,9 @@ APK 见 [Releases](https://github.com/CaiGit1/RootBatteryMonitor/releases)。
 
 ## 要求
 
-- 已 root 的 Android 8.0+ 设备
-- 部分 ROM 的 SELinux 策略会阻止读取 sysfs，应用内自检会说明原因
+- Android 8.0+
+- 有 root 则字段最全；无 root 时自动降级，不影响使用
+- 部分 ROM 的 SELinux 策略会阻止读取 sysfs，此时也会走免 root 路径
 
 ## 构建
 
