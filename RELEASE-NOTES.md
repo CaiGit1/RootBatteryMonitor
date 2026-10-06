@@ -20,16 +20,6 @@
 
 岛的宽度由系统决定，应用侧调整不了。
 
-## 安装
-
-下载 APK，在手机上点击安装。首次安装需允许「安装未知来源应用」，装好后打开应用并授予 root 权限。
-
-也可以用 adb：
-
-```bash
-adb install -r RootBatteryMonitor-v1.3.0-release.apk
-```
-
 需要 root，Android 8.0+。
 
 ---

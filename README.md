@@ -5,7 +5,9 @@
 
 读取内核 `power_supply` 节点、展示电池状态的 Android 应用，需要 root。
 
-数据只在本机显示，不联网，不写入 sysfs。
+数据只在本机显示。只用 root 执行只读命令读取 sysfs，不写入，也不申请网络权限。
+
+APK 见 [Releases](https://github.com/CaiGit1/RootBatteryMonitor/releases)。
 
 ## 功能
 
@@ -26,8 +28,6 @@
 
 ## 数据说明
 
-内核报什么就显示什么，不做猜测性换算。
-
 - 功率由「电压 × 电流」计算。`POWER_NOW` / `POWER_AVG` 在部分机型上是固定占位值，不采用；原始值仍可在「原始 uevent」查看
 - 电流与功率保留内核符号，正负表示方向（各 ROM 约定不同）
 - `CHARGE_COUNTER` 按原值展示，各 ROM 单位不统一
@@ -36,20 +36,8 @@
 
 ## 要求
 
-- 已 root 的 Android 8.0+ 设备，需授予本应用 root
+- 已 root 的 Android 8.0+ 设备
 - 部分 ROM 的 SELinux 策略会阻止读取 sysfs，应用内自检会说明原因
-
-## 安装
-
-从 [Releases](https://github.com/CaiGit1/RootBatteryMonitor/releases) 下载 APK，在手机上点击安装。
-
-首次安装需允许「安装未知来源应用」，装好后打开应用并授予 root 权限。
-
-也可以用 adb：
-
-```bash
-adb install -r RootBatteryMonitor-v1.3.0-release.apk
-```
 
 ## 构建
 
@@ -70,10 +58,6 @@ keyPassword=...
 ```
 
 密钥库丢失后无法覆盖更新已安装的应用，请离线备份。
-
-## 权限
-
-需要 root，只执行只读命令（如 `su -c cat /sys/class/power_supply/battery/uevent`），不写 sysfs，不申请网络权限。
 
 ## 许可证
 
