@@ -16,27 +16,43 @@
 
 ## 实况通知 → 小米超级岛
 
-Android 16（API 36）的**实况通知（Live Updates）** 已接入：前台服务通知会被提升为状态栏与锁屏上的实时活动。
-
-在 **HyperOS 上，系统会把实况通知直接渲染成小米超级岛** —— 因此**不需要**走小米那套 `miui.focus.param` 焦点通知接口，也**不需要**向小米提审：
+电池状态会显示在**状态栏 / 锁屏的实时活动**上。在 HyperOS 上，系统会把它渲染成**小米超级岛**：
 
 ```
-[🔋]   +2712 mW  ·  39.8°C
+[🔋]  功率+1103 mW                    温度41.2°C
 ```
 
-关键实现点：
+### 两条路径，实机上只能选一条
 
-- 声明 `android.permission.POST_PROMOTED_NOTIFICATIONS`（普通权限，非运行时）
-- 使用系统允许被提升的样式之一（`BigTextStyle`），并置上 `EXTRA_REQUEST_PROMOTED_ONGOING` 请求提升
-- **必须调用 `setShortCriticalText`**：岛上正文位取的就是它，不设置时系统回退显示通知标题，结果岛上只剩一行应用名，功率与温度全部看不见 —— 这个现象已在实机确认
+HyperOS 对「通知上岛」有两套机制，**同时用会互相打架**：
 
-> 实现说明：`setShortCriticalText(String)` 是 API 36 的方法，而本工程 `compileSdk` 仍是 35，
-> 因此用反射调用并做 API 判断（它是公开 API，非 hidden）。
+| 路径 | 谁能控制岛的内容 |
+|---|---|
+| **AOSP 实况通知**（`PROMOTED_ONGOING`） | ❌ 不行。HyperOS 会用它自己的转换逻辑，把 `shortCriticalText` 塞进右区，**左区 `textInfo.title` 留成空串**，并且**完全忽略 `miui.focus.param`** |
+| **原生岛载荷**（`miui.focus.param`） | ✅ 左右两区都由开发者控制（`imageTextInfoLeft` / `imageTextInfoRight`） |
 
-**已知限制**：岛上 `[图标]` 与 `[正文]` 之间会空出一段。已逐一实测排除四种填法
-（改短标题 / 旧式 `setProgress` / `setSubText` / `ProgressStyle` 反射构造成功但布局不变），
-确认那段是 HyperOS 为自家焦点通知载荷（大岛 / 小岛字段）预留的内容区，AOSP 实况通知没有对应数据。
-要填它只能走小米原生路径，而那条需要企业开发者认证 + 方案提报 + 按年续期。
+因此本应用的做法是：**能上岛时走原生载荷，不请求实况通知提升**；不支持岛的机型（如 Pixel）才退回 AOSP 实况通知。
+
+> 这个结论不是看文档猜的，是从 SystemUI 自己打印的岛模板里读出来的 ——
+> 它会把最终模板 base64 打进 logcat（`IslandTemplateFactory: createBigIslandTemplate: ...`），
+> 解码后能直接看到 `imageTextInfoLeft.textInfo.title` 是空串。
+
+### 上岛前的能力自查
+
+按官方《开发指南》第五节实现，三项都要过：
+
+```java
+persist.sys.feature.island          // 系统是否支持岛
+notification_focus_protocol == 3    // OS3 才支持超级岛模板
+content://miui.statusbar.notification.public → canShowFocus   // 本应用是否已获焦点通知授权
+```
+
+第三项**必须由应用自己调用**：该 provider 会校验调用方 uid 是否拥有传入的包名，
+adb / root 调用一律被拒（实测报 `Package X is not owned by uid 0`）。
+
+> ⚠️ 官方 Q&A 说焦点通知需邮件申请、按年续期。但本机 SystemUI 的 `canShowFocus`
+> 返回 `true`，说明该设备上权限是通的。**换设备后这个查询结果可能不同** ——
+> 应用已按此做降级：查不到权限就退回普通通知，不会静默失效。
 
 ## 刷新与性能
 

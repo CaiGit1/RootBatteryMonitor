@@ -7,7 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -52,11 +54,16 @@ class BatteryMonitorService : Service() {
     private lateinit var overlay: FloatingOverlay
     private var loopJob: Job? = null
     private var lastNotifyAtMs = 0L
+    private var islandCaps: HyperOsIsland.Capabilities? = null
 
     override fun onCreate() {
         super.onCreate()
         overlay = FloatingOverlay(this)
         createChannel()
+
+        // 上岛能力自查：区分「系统不支持岛」与「本应用未被授权焦点通知」。
+        // 结果缓存下来 —— hasFocusPermission 是跨进程调用，不能跟着刷新频率问。
+        islandCaps = HyperOsIsland.probe(this)
 
         try {
             startForeground(NOTIFICATION_ID, buildNotification("正在读取电池信息"))
@@ -204,7 +211,24 @@ class BatteryMonitorService : Service() {
             append("  ·  ").append(snapshot.voltageText)
             snapshot.currentNowMa?.let { append("  ·  ").append(snapshot.currentText) }
         }
-        notify(buildNotification(compact, liveText = expanded.takeIf { cfg.liveUpdateEnabled }))
+        // 能上岛时同时带上原生岛载荷：大岛左区那段是 AOSP 实况通知渲染不到的，
+        // 只有 miui.focus.param 能填（已实机确认权限已授予）。
+        val islandJson = if (islandCaps?.canPostIsland == true && cfg.liveUpdateEnabled) {
+            HyperOsIsland.buildParams(
+                powerText = power,
+                tempText = temp,
+                levelText = snapshot.levelPercent?.let { "$it%" } ?: "--"
+            )
+        } else {
+            null
+        }
+        notify(
+            buildNotification(
+                compact,
+                liveText = expanded.takeIf { cfg.liveUpdateEnabled },
+                islandJson = islandJson
+            )
+        )
     }
 
     private fun maybeNotifyError(cfg: ServiceConfig, error: MonitorError) {
@@ -248,7 +272,11 @@ class BatteryMonitorService : Service() {
      * shortCriticalText 的口子；而本工程 minSdk 26 已完全覆盖平台 Builder 的能力
      * （带 channel 的构造重载正是 API 26 引入的）。
      */
-    private fun buildNotification(content: String, liveText: String? = null): Notification {
+    private fun buildNotification(
+        content: String,
+        liveText: String? = null,
+        islandJson: String? = null
+    ): Notification {
         val openApp = PendingIntent.getActivity(
             this,
             0,
@@ -276,12 +304,35 @@ class BatteryMonitorService : Service() {
         // 岛的布局始终不变。那段是 HyperOS 为自家焦点通知载荷（大岛/小岛字段）预留的
         // 内容区，AOSP 实况通知没有对应数据 —— 只能靠 miui.focus.param 原生路径填，
         // 而那条路需要小米的商务审批。故这里保持 BigTextStyle：不冒险顶掉展开态信息。
-        if (liveText != null && Build.VERSION.SDK_INT >= API_36) {
+        // 两条路互斥，实机上试出来的：
+        //  - 发「实况通知」（PROMOTED_ONGOING）→ HyperOS 走它自己的转换，
+        //    把 shortCriticalText 塞进右区、左区留空，且忽略 miui.focus.param；
+        //  - 只发原生岛载荷 → 左右两区都由我们控制，能填满整条岛。
+        // 所以能上岛时选原生载荷；不支持岛的机型（如 Pixel）才退回 AOSP 实况通知。
+        val useNativeIsland = islandJson != null
+        if (liveText != null && Build.VERSION.SDK_INT >= API_36 && !useNativeIsland) {
             builder.setStyle(Notification.BigTextStyle().bigText(liveText))
             builder.extras.putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
             applyShortCriticalText(builder, content)
         }
-        return builder.build()
+
+        val notification = builder.build()
+
+        // 岛载荷按官方指南的做法挂在**构建完成的通知**的 extras 上
+        // （指南示例即 `notification.extras.putString("miui.focus.param", ...)`）。
+        if (islandJson != null) {
+            notification.extras.putString(HyperOsIsland.EXTRA_FOCUS_PARAM, islandJson)
+            notification.extras.putBundle(
+                HyperOsIsland.EXTRA_FOCUS_PICS,
+                Bundle().apply {
+                    putParcelable(
+                        HyperOsIsland.picKey(),
+                        Icon.createWithResource(this@BatteryMonitorService, R.drawable.ic_stat_battery)
+                    )
+                }
+            )
+        }
+        return notification
     }
 
     /**
