@@ -198,7 +198,7 @@ class BatteryMonitorService : Service() {
         if (now - lastNotifyAtMs < NOTIFY_MIN_INTERVAL_MS) return
         lastNotifyAtMs = now
 
-        if (!cfg.notificationEnabled) {
+        if (!cfg.notificationEnabled && !cfg.liveUpdateEnabled) {
             notify(buildNotification("悬浮窗运行中（通知栏明细已关闭）"))
             return
         }

@@ -1146,6 +1146,13 @@ private fun SettingsPage(
                                 "原生岛载荷可用：${if (ui.canPostIsland) "是" else "否"}\n" +
                                 "当前实际使用：$effective"
                         )
+
+                        if (!ui.promotedAllowed && !ui.canPostIsland) {
+                            Hint(
+                                "系统未允许本应用发布实况通知，因此它只会出现在下拉通知栏里，" +
+                                    "状态栏不会有缩略文本。这取决于 ROM 实现与系统设置。"
+                            )
+                        }
                     }
 
                     SwitchRow(

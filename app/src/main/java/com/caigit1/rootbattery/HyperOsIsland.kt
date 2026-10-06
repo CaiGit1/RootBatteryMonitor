@@ -186,7 +186,9 @@ object HyperOsIsland {
         val islandSupported: Boolean,
         val protocolVersion: Int,
         val focusGranted: Boolean,
-        val rom: RomInfo
+        val rom: RomInfo,
+        /** 系统是否允许本应用发布实况通知（Android 16 Live Updates） */
+        val promotedAllowed: Boolean = false
     ) {
         /** 可以走原生岛载荷：系统支持岛 + OS3 协议 + 本应用已获焦点通知授权 */
         val canPostIsland: Boolean
@@ -223,7 +225,8 @@ object HyperOsIsland {
             islandSupported = isIslandSupported(),
             protocolVersion = focusProtocolVersion(context),
             focusGranted = hasFocusPermission(context),
-            rom = detectRom()
+            rom = detectRom(),
+            promotedAllowed = canPostPromotedNotifications(context)
         )
         Log.i(
             TAG,
@@ -231,10 +234,26 @@ object HyperOsIsland {
                 "  系统支持=${caps.islandSupported}" +
                 "  协议版本=${caps.protocolVersion}(${protocolName(caps.protocolVersion)})" +
                 "  本应用已授权焦点通知=${caps.focusGranted}" +
-                "  可用原生岛载荷=${caps.canPostIsland}"
+                "  可用原生岛载荷=${caps.canPostIsland}" +
+                "  允许发布实况通知=${caps.promotedAllowed}"
         )
         return caps
     }
+
+    /**
+     * 系统是否允许本应用发布实况通知（`NotificationManager.canPostPromotedNotifications()`）。
+     *
+     * 这是判断「实况通知到底能不能生效」的唯一权威口径：仅在清单里声明
+     * `POST_PROMOTED_NOTIFICATIONS` 并置上 `EXTRA_REQUEST_PROMOTED_ONGOING`，
+     * 并不代表系统会真的提升 —— 部分 ROM 未实现该能力，或用户关掉了开关。
+     * 此时通知只能躺在下拉栏里，状态栏不会有任何缩略文本。
+     *
+     * API 36 引入，故走反射（与 setShortCriticalText 同理）。
+     */
+    fun canPostPromotedNotifications(context: Context): Boolean = runCatching {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
+        nm.javaClass.getMethod("canPostPromotedNotifications").invoke(nm) as? Boolean ?: false
+    }.getOrDefault(false)
 
     // ────────────────────────── ROM 检测 ──────────────────────────
 

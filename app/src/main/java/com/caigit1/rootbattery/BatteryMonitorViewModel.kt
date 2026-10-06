@@ -40,6 +40,8 @@ data class BatteryMonitorUiState(
     val romLabel: String = "",
     /** 设备是否具备原生岛载荷能力（三项查询全过） */
     val canPostIsland: Boolean = false,
+    /** 系统是否允许本应用发布实况通知；为 false 时通知不会出现在状态栏 */
+    val promotedAllowed: Boolean = false,
     val overlayEnabled: Boolean = false,
     val overlayFields: Set<OverlayField> = OverlayField.DEFAULT,
     /** 深色模式策略 */
@@ -52,7 +54,14 @@ data class BatteryMonitorUiState(
     val overlayLocked: Boolean = false,
     val overlayPermissionGranted: Boolean = false
 ) {
-    val serviceRunning: Boolean get() = notificationEnabled || overlayEnabled
+    /**
+     * 是否需要后台服务在跑。
+     *
+     * 实况通知也算 —— 它本身就是「一个通知」，服务不跑就无从谈起。
+     * 早先漏了这一项，导致只开「实况通知」时服务不启动，那个开关形同虚设。
+     */
+    val serviceRunning: Boolean
+        get() = notificationEnabled || overlayEnabled || liveUpdateEnabled
 }
 
 class BatteryMonitorViewModel(
@@ -92,6 +101,7 @@ class BatteryMonitorViewModel(
                 islandMode = settings.islandMode,
                 romLabel = caps.rom.label,
                 canPostIsland = caps.canPostIsland,
+                promotedAllowed = caps.promotedAllowed,
                 overlayEnabled = settings.overlayEnabled,
                 overlayFields = settings.overlayFields,
                 themeMode = settings.themeMode,
@@ -265,7 +275,7 @@ class BatteryMonitorViewModel(
     private fun syncService() {
         val ctx = getApplication<Application>()
         val s = _uiState.value
-        val wantRunning = s.notificationEnabled || s.overlayEnabled
+        val wantRunning = s.notificationEnabled || s.overlayEnabled || s.liveUpdateEnabled
 
         try {
             if (wantRunning) {
