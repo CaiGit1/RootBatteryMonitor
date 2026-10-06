@@ -283,6 +283,7 @@ private fun AppRoot(
                         onIntervalChange = vm::setIntervalMs,
                         onAlertsChange = vm::setAlertsEnabled,
                         onNotificationChange = vm::setNotificationEnabled,
+                        onLiveUpdateChange = vm::setLiveUpdateEnabled,
                         onOverlayChange = vm::setOverlayEnabled,
                         onOverlayFieldChange = vm::setOverlayField,
                         onOverlayAlphaChange = vm::setOverlayAlpha,
@@ -989,6 +990,7 @@ private fun SettingsPage(
     onIntervalChange: (Long) -> Unit,
     onAlertsChange: (Boolean) -> Unit,
     onNotificationChange: (Boolean) -> Unit,
+    onLiveUpdateChange: (Boolean) -> Unit,
     onOverlayChange: (Boolean) -> Unit,
     onOverlayFieldChange: (OverlayField, Boolean) -> Unit,
     onOverlayAlphaChange: (Float) -> Unit,
@@ -1105,6 +1107,22 @@ private fun SettingsPage(
                         checked = ui.notificationEnabled,
                         onChange = onNotificationChange
                     )
+
+                    SwitchRow(
+                        title = "实况通知（Android 16）",
+                        subtitle = "提升到状态栏/锁屏的实时活动，直接显示功率与温度",
+                        checked = ui.liveUpdateEnabled,
+                        onChange = onLiveUpdateChange
+                    )
+
+                    if (Build.VERSION.SDK_INT < 36) {
+                        Hint("当前系统低于 Android 16（API 36），实况通知不可用；升级系统后此项自动生效。")
+                    } else {
+                        Hint(
+                            "是否真的被提升由系统与用户设置决定：需在「系统设置 → 通知」中允许本应用发送推广通知。\n" +
+                                "折叠态只显示「功率 · 温度」，展开后补充电量、电压与电流。"
+                        )
+                    }
 
                     SwitchRow(
                         title = "悬浮窗",

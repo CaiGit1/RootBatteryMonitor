@@ -29,6 +29,17 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_NOTIFICATION, false)
         set(v) = prefs.edit().putBoolean(KEY_NOTIFICATION, v).apply()
 
+    /**
+     * Android 16 实况通知（Live Updates）：把前台服务的常驻通知提升为
+     * 状态栏与锁屏上的实时活动，直接显示功率与温度。
+     *
+     * 默认开启：常驻通知本来就在，提升只是让它更可见；
+     * 是否真的被提升由系统策略决定（用户也可在系统通知设置里关掉）。
+     */
+    var liveUpdateEnabled: Boolean
+        get() = prefs.getBoolean(KEY_LIVE_UPDATE, true)
+        set(v) = prefs.edit().putBoolean(KEY_LIVE_UPDATE, v).apply()
+
     var overlayEnabled: Boolean
         get() = prefs.getBoolean(KEY_OVERLAY, false)
         set(v) = prefs.edit().putBoolean(KEY_OVERLAY, v).apply()
@@ -93,6 +104,7 @@ class SettingsStore(context: Context) {
         private const val KEY_INTERVAL = "interval_ms"
         private const val KEY_ALERTS = "alerts_enabled"
         private const val KEY_NOTIFICATION = "notification_enabled"
+        private const val KEY_LIVE_UPDATE = "live_update_enabled"
         private const val KEY_OVERLAY = "overlay_enabled"
         private const val KEY_OVERLAY_FIELDS = "overlay_fields"
         private const val KEY_OVERLAY_ALPHA = "overlay_alpha"

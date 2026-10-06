@@ -10,6 +10,10 @@
     <!-- 悬浮窗：在其他应用上层显示电池信息。
          这是特殊权限，需要在系统设置里由用户手动授予（Settings.ACTION_MANAGE_OVERLAY_PERMISSION）。 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Android 16 (API 36) 实况通知（Live Updates / 以进度为中心的通知）：
+         把常驻通知提升为状态栏与锁屏上的实时活动。
+         这是普通权限（非运行时），声明即可；是否真的被提升仍由系统策略与用户开关决定。 -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"

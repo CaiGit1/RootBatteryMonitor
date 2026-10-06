@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  状态栏 / 超级岛用的单色图标。
+
+  这类图标必须是「纯白剪影 + 透明背景」：系统会自己上色，
+  带颜色或带背景的图标在深色状态栏上会糊成一块。
+  原先用 android.R.drawable.stat_notify_sync（同步用的圆形箭头），
+  语义完全不对 —— 这是个电池监控。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 电池外框（描边式，中间留空以容纳闪电） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M17,4h-1V2h-2v2h-4V2H8v2H7C5.9,4 5,4.9 5,6v14c0,1.1 0.9,2 2,2h10c1.1,0 2,-0.9 2,-2V6C19,4.9 18.1,4 17,4zM17,20H7V6h10V20z" />
+
+    <!-- 闪电 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12.6,9.2l-2.9,5.1h2.1v4.2l2.9,-5.1h-2.1z" />
+</vector>

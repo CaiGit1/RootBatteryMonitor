@@ -10,7 +10,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,7 +40,9 @@ class BatteryMonitorService : Service() {
         /** 悬浮窗的明暗跟随应用的深色模式设置，而不是无条件跟随系统 */
         val themeMode: ThemeMode = ThemeMode.DEFAULT,
         /** 悬浮窗勿扰（锁定）：不可互动、不可双击唤起应用 */
-        val overlayLocked: Boolean = false
+        val overlayLocked: Boolean = false,
+        /** Android 16 实况通知：把常驻通知提升为状态栏/锁屏上的实时活动 */
+        val liveUpdateEnabled: Boolean = true
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -85,7 +86,8 @@ class BatteryMonitorService : Service() {
             overlayAlpha = store.overlayAlpha,
             overlayBackground = store.overlayBackground,
             themeMode = store.themeMode,
-            overlayLocked = store.overlayLocked
+            overlayLocked = store.overlayLocked,
+            liveUpdateEnabled = store.liveUpdateEnabled
         )
 
         config.value = if (intent == null) {
@@ -115,6 +117,9 @@ class BatteryMonitorService : Service() {
                     ?: fallback.themeMode,
                 overlayLocked = intent.getBooleanExtra(
                     EXTRA_OVERLAY_LOCKED, fallback.overlayLocked
+                ),
+                liveUpdateEnabled = intent.getBooleanExtra(
+                    EXTRA_LIVE_UPDATE, fallback.liveUpdateEnabled
                 )
             )
         }
@@ -180,19 +185,26 @@ class BatteryMonitorService : Service() {
         if (now - lastNotifyAtMs < NOTIFY_MIN_INTERVAL_MS) return
         lastNotifyAtMs = now
 
-        val text = if (cfg.notificationEnabled) {
-            buildString {
-                append(snapshot.levelPercent?.let { "$it%" } ?: "--")
-                append("  ·  ")
-                append(snapshot.temperatureText)
-                append("  ·  ")
-                append(snapshot.voltageText)
-                snapshot.currentNowMa?.let { append("  ·  $it mA") }
-            }
-        } else {
-            "悬浮窗运行中（通知栏明细已关闭）"
+        if (!cfg.notificationEnabled) {
+            notify(buildNotification("悬浮窗运行中（通知栏明细已关闭）"))
+            return
         }
-        notify(buildNotification(text))
+
+        // 实况通知的重点就是功率与温度：折叠态只留最紧凑的一行，
+        // 展开态（BigText）再补电量/电压/电流 —— 状态栏位置寸土寸金，不能一上来就堆满。
+        val power = snapshot.computedPowerText
+        val temp = snapshot.temperatureText
+        // 岛里正文槽位是固定宽度：实测再加内容（如电量）会被直接裁掉，
+        // 而左侧那段空白也不随文本变长而收缩。所以这里只放最关键的功率与温度。
+        val compact = "$power$SHORT_TEXT_SEPARATOR$temp"
+        val expanded = buildString {
+            append("功率 ").append(power)
+            append("  ·  温度 ").append(temp)
+            snapshot.levelPercent?.let { append("  ·  电量 ").append(it).append('%') }
+            append("  ·  ").append(snapshot.voltageText)
+            snapshot.currentNowMa?.let { append("  ·  ").append(snapshot.currentText) }
+        }
+        notify(buildNotification(compact, liveText = expanded.takeIf { cfg.liveUpdateEnabled }))
     }
 
     private fun maybeNotifyError(cfg: ServiceConfig, error: MonitorError) {
@@ -209,7 +221,34 @@ class BatteryMonitorService : Service() {
         }
     }
 
-    private fun buildNotification(content: String): Notification {
+    /**
+     * 构建常驻通知。
+     *
+     * @param liveText 非 null 时把通知**提升为实况通知**（Android 16 Live Updates）：
+     *   样式换成 `BigTextStyle`（系统允许被提升的四种样式之一），
+     *   置上 `EXTRA_REQUEST_PROMOTED_ONGOING` 请求提升，
+     *   并设置「短关键文本」。
+     *
+     * **短关键文本不是可选润色，而是本功能能用的前提**：
+     * HyperOS 会把实况通知直接渲染成小米超级岛，岛上正文位取的就是 `shortCriticalText`；
+     * 不设置时系统回退显示通知标题，结果岛上只剩一行「Root Battery Monitor」，
+     * 功率与温度全部看不见（实机确认过这个现象）。
+     *
+     * 两处不得不绕的原因，都不是随手写的：
+     *  - 内联 `EXTRA_REQUEST_PROMOTED_ONGOING` 的常量名与取值：它是 API 36 才有的字段，
+     *    而本工程 compileSdk 仍是 35，直接引用编译不过。取值由 SDK 存根确认：
+     *    `javap -constants android.app.Notification` 输出
+     *    `EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"`。
+     *  - `setShortCriticalText` 用反射调用：同样是 API 36 的方法，且 androidx core 1.16
+     *    都还没封装它。它是**公开 API（非 hidden）**，只是本机编译链没跟上
+     *    （本地只有 `platforms/android-36.1`，AGP 8.6 不认这个目录名），
+     *    反射 + API 判断比为一行字符串升级整条编译链划算。
+     *
+     * 用平台 `Notification.Builder` 而非 `NotificationCompat.Builder`：后者没有
+     * shortCriticalText 的口子；而本工程 minSdk 26 已完全覆盖平台 Builder 的能力
+     * （带 channel 的构造重载正是 API 26 引入的）。
+     */
+    private fun buildNotification(content: String, liveText: String? = null): Notification {
         val openApp = PendingIntent.getActivity(
             this,
             0,
@@ -218,15 +257,57 @@ class BatteryMonitorService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle("Root Battery Monitor")
+        val builder = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_battery)
+            .setContentTitle(NOTIFICATION_TITLE)
             .setContentText(content)
             .setContentIntent(openApp)
             .setOngoing(true)
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+            // 平台 Builder 没有 setSilent —— 那是 NotificationCompat 的便利方法，
+            // 内部靠清空 sound/vibrate/defaults 实现。API 26 起铃声与震动由通知渠道决定，
+            // 本渠道是 IMPORTANCE_LOW，本就静默；这里只需声明「只提示一次」。
+            .setOnlyAlertOnce(true)
+            .setPriority(Notification.PRIORITY_LOW)
+
+        // 实况通知的样式必须是系统允许被提升的四种之一。
+        //
+        // 关于超级岛里 [图标] 与 [短关键文本] 之间那段空白：已逐一实测排除四种填法
+        // （改短标题 / 旧式 setProgress / setSubText / ProgressStyle），
+        // 岛的布局始终不变。那段是 HyperOS 为自家焦点通知载荷（大岛/小岛字段）预留的
+        // 内容区，AOSP 实况通知没有对应数据 —— 只能靠 miui.focus.param 原生路径填，
+        // 而那条路需要小米的商务审批。故这里保持 BigTextStyle：不冒险顶掉展开态信息。
+        if (liveText != null && Build.VERSION.SDK_INT >= API_36) {
+            builder.setStyle(Notification.BigTextStyle().bigText(liveText))
+            builder.extras.putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
+            applyShortCriticalText(builder, content)
+        }
+        return builder.build()
+    }
+
+    /**
+     * 设置实况通知的短关键文本（超级岛正文位）。
+     *
+     * 系统对它有长度上限，但该上限没有暴露在 SDK 里，本地无法预先得知。
+     * 因此按「完整 → 精简」逐个候选试，成功的那个打进日志；
+     * 全部被拒时明确记一条 —— 这比静默失败强，至少能在 logcat 里看出岛为何是空的。
+     */
+    private fun applyShortCriticalText(builder: Notification.Builder, text: String) {
+        val setter = runCatching {
+            Notification.Builder::class.java.getMethod("setShortCriticalText", String::class.java)
+        }.getOrNull()
+        if (setter == null) {
+            Log.w(TAG, "本机没有 setShortCriticalText，跳过短关键文本")
+            return
+        }
+
+        val candidates = listOf(text, text.substringBefore(SHORT_TEXT_SEPARATOR))
+        for (candidate in candidates) {
+            if (runCatching { setter.invoke(builder, candidate) }.isSuccess) {
+                Log.i(TAG, "实况通知短关键文本 = \"$candidate\"")
+                return
+            }
+        }
+        Log.w(TAG, "短关键文本全部候选被拒，超级岛将回退显示通知标题")
     }
 
     private fun createChannel() {
@@ -253,6 +334,22 @@ class BatteryMonitorService : Service() {
         private const val EXTRA_OVERLAY_BG = "overlay_background"
         private const val EXTRA_THEME_MODE = "theme_mode"
         private const val EXTRA_OVERLAY_LOCKED = "overlay_locked"
+        private const val EXTRA_LIVE_UPDATE = "live_update_enabled"
+
+        private const val NOTIFICATION_TITLE = "电池"
+
+        /** 折叠态两段信息的连接符，同时也是短关键文本的截断点 */
+        private const val SHORT_TEXT_SEPARATOR = "  ·  "
+
+        /** Android 16 = API 36。compileSdk 仍是 35，所以不能引用 Build.VERSION_CODES 里的新名字 */
+        private const val API_36 = 36
+
+        /**
+         * `Notification.EXTRA_REQUEST_PROMOTED_ONGOING` 的常量名与取值。
+         * 取值由 SDK 存根确认：`javap -constants android.app.Notification` 输出
+         * `EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"`。
+         */
+        private const val EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"
 
         private const val NOTIFY_MIN_INTERVAL_MS = 1000L
         private const val NOTIFY_ERROR_MIN_INTERVAL_MS = 10_000L
@@ -267,7 +364,8 @@ class BatteryMonitorService : Service() {
             overlayAlpha: Float,
             overlayBackground: OverlayBackground,
             themeMode: ThemeMode,
-            overlayLocked: Boolean
+            overlayLocked: Boolean,
+            liveUpdateEnabled: Boolean
         ): Intent = Intent(context, BatteryMonitorService::class.java).apply {
             putExtra(EXTRA_INTERVAL_MS, intervalMs)
             putExtra(EXTRA_NOTIFICATION, notificationEnabled)
@@ -276,6 +374,7 @@ class BatteryMonitorService : Service() {
             putExtra(EXTRA_OVERLAY_BG, overlayBackground.name)
             putExtra(EXTRA_THEME_MODE, themeMode.name)
             putExtra(EXTRA_OVERLAY_LOCKED, overlayLocked)
+            putExtra(EXTRA_LIVE_UPDATE, liveUpdateEnabled)
             putStringArrayListExtra(
                 EXTRA_OVERLAY_FIELDS,
                 ArrayList(overlayFields.map { it.name })

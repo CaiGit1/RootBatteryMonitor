@@ -32,6 +32,8 @@ data class BatteryMonitorUiState(
     val alertsEnabled: Boolean = true,
     /** 通知栏常驻（显示实时数值） */
     val notificationEnabled: Boolean = false,
+    /** Android 16 实况通知：把常驻通知提升为状态栏/锁屏上的实时活动 */
+    val liveUpdateEnabled: Boolean = true,
     val overlayEnabled: Boolean = false,
     val overlayFields: Set<OverlayField> = OverlayField.DEFAULT,
     /** 深色模式策略 */
@@ -78,6 +80,7 @@ class BatteryMonitorViewModel(
                 intervalMs = settings.intervalMs,
                 alertsEnabled = settings.alertsEnabled,
                 notificationEnabled = settings.notificationEnabled,
+                liveUpdateEnabled = settings.liveUpdateEnabled,
                 overlayEnabled = settings.overlayEnabled,
                 overlayFields = settings.overlayFields,
                 themeMode = settings.themeMode,
@@ -138,6 +141,16 @@ class BatteryMonitorViewModel(
     fun setNotificationEnabled(enabled: Boolean) {
         settings.notificationEnabled = enabled
         _uiState.update { it.copy(notificationEnabled = enabled) }
+        syncService()
+    }
+
+    /**
+     * 实况通知开关。改完要重新下发配置 —— 通知是服务在发，
+     * 不重启采样循环的话它会一直用旧的 ServiceConfig。
+     */
+    fun setLiveUpdateEnabled(enabled: Boolean) {
+        settings.liveUpdateEnabled = enabled
+        _uiState.update { it.copy(liveUpdateEnabled = enabled) }
         syncService()
     }
 
@@ -249,7 +262,8 @@ class BatteryMonitorViewModel(
                         overlayAlpha = s.overlayAlpha,
                         overlayBackground = s.overlayBackground,
                         themeMode = s.themeMode,
-                        overlayLocked = s.overlayLocked
+                        overlayLocked = s.overlayLocked,
+                        liveUpdateEnabled = s.liveUpdateEnabled
                     )
                 )
             } else {
