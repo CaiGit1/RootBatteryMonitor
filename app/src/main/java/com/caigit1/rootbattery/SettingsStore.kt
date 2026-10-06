@@ -40,6 +40,11 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_LIVE_UPDATE, true)
         set(v) = prefs.edit().putBoolean(KEY_LIVE_UPDATE, v).apply()
 
+    /** 实况通知的呈现方式：自动 / 小米超级岛 / 类原生 AOSP */
+    var islandMode: IslandMode
+        get() = IslandMode.fromName(prefs.getString(KEY_ISLAND_MODE, null))
+        set(v) = prefs.edit().putString(KEY_ISLAND_MODE, v.name).apply()
+
     var overlayEnabled: Boolean
         get() = prefs.getBoolean(KEY_OVERLAY, false)
         set(v) = prefs.edit().putBoolean(KEY_OVERLAY, v).apply()
@@ -105,6 +110,7 @@ class SettingsStore(context: Context) {
         private const val KEY_ALERTS = "alerts_enabled"
         private const val KEY_NOTIFICATION = "notification_enabled"
         private const val KEY_LIVE_UPDATE = "live_update_enabled"
+        private const val KEY_ISLAND_MODE = "island_mode"
         private const val KEY_OVERLAY = "overlay_enabled"
         private const val KEY_OVERLAY_FIELDS = "overlay_fields"
         private const val KEY_OVERLAY_ALPHA = "overlay_alpha"

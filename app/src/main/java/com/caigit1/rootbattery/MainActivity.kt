@@ -284,6 +284,7 @@ private fun AppRoot(
                         onAlertsChange = vm::setAlertsEnabled,
                         onNotificationChange = vm::setNotificationEnabled,
                         onLiveUpdateChange = vm::setLiveUpdateEnabled,
+                        onIslandModeChange = vm::setIslandMode,
                         onOverlayChange = vm::setOverlayEnabled,
                         onOverlayFieldChange = vm::setOverlayField,
                         onOverlayAlphaChange = vm::setOverlayAlpha,
@@ -991,6 +992,7 @@ private fun SettingsPage(
     onAlertsChange: (Boolean) -> Unit,
     onNotificationChange: (Boolean) -> Unit,
     onLiveUpdateChange: (Boolean) -> Unit,
+    onIslandModeChange: (IslandMode) -> Unit,
     onOverlayChange: (Boolean) -> Unit,
     onOverlayFieldChange: (OverlayField, Boolean) -> Unit,
     onOverlayAlphaChange: (Float) -> Unit,
@@ -1118,9 +1120,31 @@ private fun SettingsPage(
                     if (Build.VERSION.SDK_INT < 36) {
                         Hint("当前系统低于 Android 16（API 36），实况通知不可用；升级系统后此项自动生效。")
                     } else {
+                        Text("呈现方式", style = MaterialTheme.typography.labelLarge)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            IslandMode.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = ui.islandMode == mode,
+                                    onClick = { onIslandModeChange(mode) },
+                                    label = { Text(mode.label) }
+                                )
+                            }
+                        }
+                        Hint(ui.islandMode.hint)
+
+                        // 设备自查结果直接摆出来：出问题时能一眼分清是「ROM 不支持」
+                        // 还是「本应用没被授权」，不用去翻 logcat。
+                        val effective = if (
+                            ui.islandMode != IslandMode.AOSP && ui.canPostIsland
+                        ) {
+                            "小米超级岛（原生载荷，左右两区可控）"
+                        } else {
+                            "AOSP 实况通知（短关键文本）"
+                        }
                         Hint(
-                            "是否真的被提升由系统与用户设置决定：需在「系统设置 → 通知」中允许本应用发送推广通知。\n" +
-                                "折叠态只显示「功率 · 温度」，展开后补充电量、电压与电流。"
+                            "设备：${ui.romLabel.ifEmpty { "未知" }}\n" +
+                                "原生岛载荷可用：${if (ui.canPostIsland) "是" else "否"}\n" +
+                                "当前实际使用：$effective"
                         )
                     }
 

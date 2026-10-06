@@ -44,7 +44,9 @@ class BatteryMonitorService : Service() {
         /** 悬浮窗勿扰（锁定）：不可互动、不可双击唤起应用 */
         val overlayLocked: Boolean = false,
         /** Android 16 实况通知：把常驻通知提升为状态栏/锁屏上的实时活动 */
-        val liveUpdateEnabled: Boolean = true
+        val liveUpdateEnabled: Boolean = true,
+        /** 实况通知的呈现方式：自动 / 小米超级岛 / 类原生 AOSP */
+        val islandMode: IslandMode = IslandMode.DEFAULT
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -94,7 +96,8 @@ class BatteryMonitorService : Service() {
             overlayBackground = store.overlayBackground,
             themeMode = store.themeMode,
             overlayLocked = store.overlayLocked,
-            liveUpdateEnabled = store.liveUpdateEnabled
+            liveUpdateEnabled = store.liveUpdateEnabled,
+            islandMode = store.islandMode
         )
 
         config.value = if (intent == null) {
@@ -127,7 +130,10 @@ class BatteryMonitorService : Service() {
                 ),
                 liveUpdateEnabled = intent.getBooleanExtra(
                     EXTRA_LIVE_UPDATE, fallback.liveUpdateEnabled
-                )
+                ),
+                islandMode = intent.getStringExtra(EXTRA_ISLAND_MODE)
+                    ?.let { IslandMode.fromName(it) }
+                    ?: fallback.islandMode
             )
         }
         return START_STICKY
@@ -211,9 +217,14 @@ class BatteryMonitorService : Service() {
             append("  ·  ").append(snapshot.voltageText)
             snapshot.currentNowMa?.let { append("  ·  ").append(snapshot.currentText) }
         }
-        // 能上岛时同时带上原生岛载荷：大岛左区那段是 AOSP 实况通知渲染不到的，
-        // 只有 miui.focus.param 能填（已实机确认权限已授予）。
-        val islandJson = if (islandCaps?.canPostIsland == true && cfg.liveUpdateEnabled) {
+        // 由「用户选择 + 设备能力」共同决定这次走哪条路。
+        // 两条路互斥：HyperOS 上若同时请求实况通知，系统会用它自己的转换逻辑
+        // 覆盖岛内容（左区留空并忽略 miui.focus.param）。
+        val caps = islandCaps
+        val effectiveMode = caps?.let { HyperOsIsland.resolveMode(cfg.islandMode, it) }
+        val islandJson = if (
+            cfg.liveUpdateEnabled && effectiveMode == HyperOsIsland.EffectiveMode.XIAOMI_ISLAND
+        ) {
             HyperOsIsland.buildParams(
                 powerText = power,
                 tempText = temp,
@@ -386,6 +397,7 @@ class BatteryMonitorService : Service() {
         private const val EXTRA_THEME_MODE = "theme_mode"
         private const val EXTRA_OVERLAY_LOCKED = "overlay_locked"
         private const val EXTRA_LIVE_UPDATE = "live_update_enabled"
+        private const val EXTRA_ISLAND_MODE = "island_mode"
 
         private const val NOTIFICATION_TITLE = "电池"
 
@@ -416,7 +428,8 @@ class BatteryMonitorService : Service() {
             overlayBackground: OverlayBackground,
             themeMode: ThemeMode,
             overlayLocked: Boolean,
-            liveUpdateEnabled: Boolean
+            liveUpdateEnabled: Boolean,
+            islandMode: IslandMode
         ): Intent = Intent(context, BatteryMonitorService::class.java).apply {
             putExtra(EXTRA_INTERVAL_MS, intervalMs)
             putExtra(EXTRA_NOTIFICATION, notificationEnabled)
@@ -426,6 +439,7 @@ class BatteryMonitorService : Service() {
             putExtra(EXTRA_THEME_MODE, themeMode.name)
             putExtra(EXTRA_OVERLAY_LOCKED, overlayLocked)
             putExtra(EXTRA_LIVE_UPDATE, liveUpdateEnabled)
+            putExtra(EXTRA_ISLAND_MODE, islandMode.name)
             putStringArrayListExtra(
                 EXTRA_OVERLAY_FIELDS,
                 ArrayList(overlayFields.map { it.name })

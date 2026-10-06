@@ -34,6 +34,12 @@ data class BatteryMonitorUiState(
     val notificationEnabled: Boolean = false,
     /** Android 16 实况通知：把常驻通知提升为状态栏/锁屏上的实时活动 */
     val liveUpdateEnabled: Boolean = true,
+    /** 实况通知的呈现方式：自动 / 小米超级岛 / 类原生 AOSP */
+    val islandMode: IslandMode = IslandMode.DEFAULT,
+    /** 检测到的 ROM 名称，用于在设置页说明当前设备走到了哪条路 */
+    val romLabel: String = "",
+    /** 设备是否具备原生岛载荷能力（三项查询全过） */
+    val canPostIsland: Boolean = false,
     val overlayEnabled: Boolean = false,
     val overlayFields: Set<OverlayField> = OverlayField.DEFAULT,
     /** 深色模式策略 */
@@ -75,12 +81,17 @@ class BatteryMonitorViewModel(
     private var pollJob: Job? = null
 
     init {
+        // 查一次设备的上岛能力：给设置页展示，也避免服务侧反复跨进程查询
+        val caps = HyperOsIsland.probe(application)
         _uiState.update {
             it.copy(
                 intervalMs = settings.intervalMs,
                 alertsEnabled = settings.alertsEnabled,
                 notificationEnabled = settings.notificationEnabled,
                 liveUpdateEnabled = settings.liveUpdateEnabled,
+                islandMode = settings.islandMode,
+                romLabel = caps.rom.label,
+                canPostIsland = caps.canPostIsland,
                 overlayEnabled = settings.overlayEnabled,
                 overlayFields = settings.overlayFields,
                 themeMode = settings.themeMode,
@@ -151,6 +162,13 @@ class BatteryMonitorViewModel(
     fun setLiveUpdateEnabled(enabled: Boolean) {
         settings.liveUpdateEnabled = enabled
         _uiState.update { it.copy(liveUpdateEnabled = enabled) }
+        syncService()
+    }
+
+    /** 切换呈现方式。服务侧会按「用户选择 + 设备能力」重新解析，改完要重新下发配置。 */
+    fun setIslandMode(mode: IslandMode) {
+        settings.islandMode = mode
+        _uiState.update { it.copy(islandMode = mode) }
         syncService()
     }
 
@@ -263,7 +281,8 @@ class BatteryMonitorViewModel(
                         overlayBackground = s.overlayBackground,
                         themeMode = s.themeMode,
                         overlayLocked = s.overlayLocked,
-                        liveUpdateEnabled = s.liveUpdateEnabled
+                        liveUpdateEnabled = s.liveUpdateEnabled,
+                        islandMode = s.islandMode
                     )
                 )
             } else {

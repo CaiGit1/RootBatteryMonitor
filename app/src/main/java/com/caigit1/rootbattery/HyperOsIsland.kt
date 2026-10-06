@@ -49,6 +49,9 @@ object HyperOsIsland {
         (method.invoke(null, KEY_FEATURE_ISLAND, false) as? Boolean) ?: false
     }.getOrDefault(false)
 
+    /** `notification_focus_protocol` 的展示名 */
+    fun protocolLabel(protocol: Int): String = protocolName(protocol)
+
     /** 岛参数里引用的图片 key；实机图片通过 `miui.focus.pics` 这个 Bundle 传 */
     private const val PIC_BATTERY = "miui.focus.pic_battery"
 
@@ -182,11 +185,31 @@ object HyperOsIsland {
     data class Capabilities(
         val islandSupported: Boolean,
         val protocolVersion: Int,
-        val focusGranted: Boolean
+        val focusGranted: Boolean,
+        val rom: RomInfo
     ) {
         /** 可以走原生岛载荷：系统支持岛 + OS3 协议 + 本应用已获焦点通知授权 */
         val canPostIsland: Boolean
             get() = islandSupported && protocolVersion >= PROTOCOL_OS3 && focusGranted
+    }
+
+    /** 实际采用哪条呈现路径 */
+    enum class EffectiveMode { XIAOMI_ISLAND, AOSP_LIVE_UPDATE }
+
+    /**
+     * 依据用户选择与设备能力，决定这一次到底走哪条路。
+     *
+     * 注意「强制小米」在设备不支持时也会退回 AOSP —— 硬发一个系统不认的载荷
+     * 只会得到一个既不显示岛、又丢掉了实况通知的通知，比退回更差。
+     */
+    fun resolveMode(mode: IslandMode, caps: Capabilities): EffectiveMode = when (mode) {
+        IslandMode.AOSP -> EffectiveMode.AOSP_LIVE_UPDATE
+        IslandMode.XIAOMI,
+        IslandMode.AUTO -> if (caps.canPostIsland) {
+            EffectiveMode.XIAOMI_ISLAND
+        } else {
+            EffectiveMode.AOSP_LIVE_UPDATE
+        }
     }
 
     /**
@@ -199,17 +222,62 @@ object HyperOsIsland {
         val caps = Capabilities(
             islandSupported = isIslandSupported(),
             protocolVersion = focusProtocolVersion(context),
-            focusGranted = hasFocusPermission(context)
+            focusGranted = hasFocusPermission(context),
+            rom = detectRom()
         )
         Log.i(
             TAG,
-            "超级岛能力: 系统支持=${caps.islandSupported}" +
+            "超级岛能力: ROM=${caps.rom.label}(${if (caps.rom.isXiaomi) "小米系" else "非小米"})" +
+                "  系统支持=${caps.islandSupported}" +
                 "  协议版本=${caps.protocolVersion}(${protocolName(caps.protocolVersion)})" +
                 "  本应用已授权焦点通知=${caps.focusGranted}" +
                 "  可用原生岛载荷=${caps.canPostIsland}"
         )
         return caps
     }
+
+    // ────────────────────────── ROM 检测 ──────────────────────────
+
+    /**
+     * 设备 ROM 信息。
+     *
+     * @param isXiaomi 是否为小米系 ROM（MIUI / HyperOS）
+     * @param label    给用户看的名称，如 `HyperOS 4.0 · OS3.0.304.0.WMKCNXM`
+     */
+    data class RomInfo(val isXiaomi: Boolean, val label: String)
+
+    /**
+     * 检测 ROM。
+     *
+     * 用系统属性而不是 `Build.MANUFACTURER`：小米系 ROM 也被第三方移植到过别家机型上，
+     * 而能力取决于 **ROM** 而不是硬件品牌。`ro.mi.os.version.name`（HyperOS）与
+     * `ro.miui.ui.version.name`（MIUI）任一非空即判为小米系。
+     *
+     * 注意这只是**给用户看的辅助信息**，真正的判定仍以 [Capabilities.canPostIsland]
+     * 那个三项查询为准 —— ROM 名字对不上但系统能力齐全的情况是存在的。
+     */
+    fun detectRom(): RomInfo {
+        val hyperOs = systemProperty("ro.mi.os.version.name")
+        val miui = systemProperty("ro.miui.ui.version.name")
+        val incremental = systemProperty("ro.build.version.incremental")
+        val isXiaomi = hyperOs.isNotEmpty() || miui.isNotEmpty()
+
+        val label = buildString {
+            when {
+                hyperOs.isNotEmpty() -> append("HyperOS ").append(hyperOs)
+                miui.isNotEmpty() -> append("MIUI ").append(miui)
+                else -> append(android.os.Build.BRAND).append(' ').append(android.os.Build.MODEL)
+            }
+            if (incremental.isNotEmpty()) append(" · ").append(incremental)
+        }
+        return RomInfo(isXiaomi, label)
+    }
+
+    private fun systemProperty(key: String): String = runCatching {
+        val clazz = Class.forName("android.os.SystemProperties")
+        val method = clazz.getDeclaredMethod("get", String::class.java)
+        (method.invoke(null, key) as? String)?.trim().orEmpty()
+    }.getOrDefault("")
 
     private fun protocolName(protocol: Int): String = when (protocol) {
         1 -> "OS1"
