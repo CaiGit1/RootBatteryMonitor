@@ -246,8 +246,15 @@ class BatteryMonitorService : Service() {
         val now = System.currentTimeMillis()
         if (now - lastNotifyAtMs < NOTIFY_ERROR_MIN_INTERVAL_MS) return
         lastNotifyAtMs = now
-        if (!cfg.notificationEnabled) return
-        notify(buildNotification("读取异常：${error.message}"))
+        if (!cfg.notificationEnabled && !cfg.liveUpdateEnabled) return
+        // 出错时也走实况通知：读不到数据是最该被看见的状态。
+        // 折叠态/状态栏只放短句，完整原因留给展开态，避免胶囊被长文本撑爆。
+        notify(
+            buildNotification(
+                "读取失败",
+                liveText = "读取异常：${error.message}".takeIf { cfg.liveUpdateEnabled }
+            )
+        )
     }
 
     private fun notify(notification: Notification) {
