@@ -33,6 +33,26 @@ HyperOS 对「通知上岛」有两套机制，**同时用会互相打架**：
 
 因此本应用的做法是：**能上岛时走原生载荷，不请求实况通知提升**；不支持岛的机型（如 Pixel）才退回 AOSP 实况通知。
 
+**呈现方式可在设置里手动选择**（自动 / 小米超级岛 / 类原生 AOSP）：
+
+- `自动`：按设备 ROM 与系统能力判断（默认）
+- `小米超级岛`：强制原生载荷；设备不支持时**自动退回** AOSP ——
+  硬发一个系统不认的载荷只会得到一个既不显示岛、又丢了实况通知的通知
+- `类原生 AOSP`：强制走 Android 16 实况通知
+
+设置页会直接显示设备自查结果，出问题时能一眼分清是「ROM 不支持」还是「本应用未被授权」：
+
+```
+设备：HyperOS 4.0 · OS3.0.304.0.WMKCNXM
+原生岛载荷可用：是
+当前实际使用：小米超级岛（原生载荷，左右两区可控）
+```
+
+> ROM 判定读 `ro.mi.os.version.name`（HyperOS）与 `ro.miui.ui.version.name`（MIUI），
+> 而不是 `Build.MANUFACTURER` —— 能力取决于 **ROM** 而非硬件品牌，
+> 小米 ROM 被移植到别家机型是常见事。ROM 名只是给人看的辅助信息，
+> 真正的判定仍以那三项能力查询为准。
+
 > 这个结论不是看文档猜的，是从 SystemUI 自己打印的岛模板里读出来的 ——
 > 它会把最终模板 base64 打进 logcat（`IslandTemplateFactory: createBigIslandTemplate: ...`），
 > 解码后能直接看到 `imageTextInfoLeft.textInfo.title` 是空串。
