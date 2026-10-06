@@ -82,7 +82,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
 
-  implementation("com.google.android.material:material:1.12.0")
+  implementation("com.google.android.material:material:1.14.0")
  debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
