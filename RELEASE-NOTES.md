@@ -1,8 +1,81 @@
-# Root Battery Monitor v1.2.0
+# Root Battery Monitor v1.3.0
 
-自 v1.1.0 以来的一次功能级更新：悬浮窗、高频刷新、界面重构、Material You 主题，以及若干**基于真机实测**修正的数据准确性问题。
+本次是**实况通知 / 小米超级岛**专项更新：电池状态现在会显示在状态栏与锁屏的实时活动上，
+在 HyperOS 上直接渲染成小米超级岛。
+
+```
+[🔋]  +2438 mW                    40.8°C
+```
 
 ---
+
+## 小米超级岛
+
+- **左区功率、右区温度**，两区都填满，不留空白
+- 只用**纯数值 + 单位**，不带中文标签，两侧格式统一
+- 首次出现自动展开；之后**更新时不自动展开** —— 这个应用每秒都在刷新，
+  每拍都把岛弹开等于每秒抢一次注意力
+- 状态栏图标换成单色电池轮廓 + 闪电，替掉语义不符的同步图标
+
+### 两条路径互斥（实机试出来的）
+
+HyperOS 对「通知上岛」有两套机制，**同时用会互相打架**：
+
+| 路径 | 谁能控制岛的内容 |
+|---|---|
+| **AOSP 实况通知**（`PROMOTED_ONGOING`） | ❌ 不行。HyperOS 会用它自己的转换逻辑，把 `shortCriticalText` 塞进右区，**左区 `textInfo.title` 留成空串**，并且**完全忽略 `miui.focus.param`** |
+| **原生岛载荷**（`miui.focus.param`） | ✅ 左右两区都由开发者控制（`imageTextInfoLeft` / `imageTextInfoRight`） |
+
+> 这个结论不是看文档猜的，是从 SystemUI 自己打印的岛模板里读出来的 ——
+> 它会把最终模板 base64 打进 logcat（`IslandTemplateFactory: createBigIslandTemplate: ...`），
+> 解码后能直接看到 `imageTextInfoLeft.textInfo.title` 是空串。
+
+## 呈现方式可自选（自动 / 小米超级岛 / 类原生 AOSP）
+
+同一份通知在两套系统上的最佳形态不一样，因此提供三档开关：
+
+- `自动`：按设备 ROM 与系统能力判断（默认）
+- `小米超级岛`：强制原生载荷；设备不支持时**自动退回** AOSP ——
+  硬发一个系统不认的载荷只会得到一个既不显示岛、又丢了实况通知的通知
+- `类原生 AOSP`：强制走 Android 16 实况通知（Live Updates）
+
+设置页会直接显示设备自查结果，出问题时能一眼分清是「ROM 不支持」还是「本应用未被授权」：
+
+```
+设备：HyperOS 4.0 · OS3.0.304.0.WMKCNXM
+原生岛载荷可用：是
+当前实际使用：小米超级岛（原生载荷，左右两区可控）
+```
+
+### 设备能力自查
+
+按官方《开发指南》第五节实现，三项都要过：
+
+```java
+persist.sys.feature.island          // 系统是否支持岛
+notification_focus_protocol == 3    // OS3 才支持超级岛模板
+content://miui.statusbar.notification.public → canShowFocus   // 本应用是否已获焦点通知授权
+```
+
+第三项**必须由应用自己调用**：该 provider 会校验调用方 uid 是否拥有传入的包名，
+adb / root 调用一律被拒（实测报 `Package X is not owned by uid 0`）。
+
+ROM 判定读 `ro.mi.os.version.name`（HyperOS）与 `ro.miui.ui.version.name`（MIUI），
+而不是 `Build.MANUFACTURER` —— 能力取决于 **ROM** 而非硬件品牌，
+小米 ROM 被移植到别家机型是常见事。
+
+**在非小米设备上**会自动走 AOSP 实况通知：声明 `POST_PROMOTED_NOTIFICATIONS`、
+用系统允许被提升的样式之一、置上 `EXTRA_REQUEST_PROMOTED_ONGOING` 请求提升，
+并用 `setShortCriticalText` 提供状态栏胶囊文案。
+
+## 已知限制
+
+**岛胶囊宽度改不动。** 已逐一实测「缩短内容」「只填左区」「关闭 `islandFirstFloat` /
+`enableFloat`」，宽度始终不变 —— 那是 SystemUI 大岛的固定尺寸，不按内容计算。
+
+---
+
+# 以下为 v1.2.0 既有内容
 
 ## 悬浮窗
 
