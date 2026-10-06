@@ -1,0 +1,107 @@
+name: Release
+
+# 推送 v* 标签即自动构建并发布 GitHub Release（用内置 GITHUB_TOKEN，无需个人令牌）。
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      # 创建 Release 与上传附件需要写权限；其余保持只读
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # 不使用 android-actions/setup-android@v3：它内部固定执行 `sdkmanager tools`，
+      # 而 Google 已移除 legacy `tools` 包，该动作必然失败。详见 android-build.yml 的注释。
+      - name: Configure Android SDK
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          if [ -z "$SDK" ]; then SDK=/usr/local/lib/android/sdk; fi
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Install required SDK packages
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          yes | sdkmanager --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
+          sdkmanager --sdk_root="$SDK" \
+            "platforms;android-35" \
+            "build-tools;34.0.0" \
+            "platform-tools"
+
+      # 配了密钥库 Secrets 就出正式签名包；没配则退回 debug 签名包。
+      # debug 包可直接安装，但**无法覆盖**已安装的正式签名包，release 说明里已注明。
+      - name: Restore release keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "storeFile=$RUNNER_TEMP/release.jks"
+              echo "storePassword=$KEYSTORE_PASSWORD"
+              echo "keyAlias=$KEY_ALIAS"
+              echo "keyPassword=$KEY_PASSWORD"
+            } > keystore.properties
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "已注入发布密钥库，将构建正式签名包"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "未配置密钥库 Secrets，将构建 debug 签名包（可直接安装，但无法覆盖正式签名包）"
+          fi
+
+      - name: Build signed release APK
+        if: steps.keystore.outputs.signed == 'true'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Build debug-signed APK
+        if: steps.keystore.outputs.signed != 'true'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Collect APK
+        id: apk
+        run: |
+          SRC=$(find app/build/outputs/apk -name '*.apk' | head -n 1)
+          if [ -z "$SRC" ]; then echo "没有找到 APK 产物" >&2; exit 1; fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${{ steps.keystore.outputs.signed }}" = "true" ]; then
+            OUT="RootBatteryMonitor-${VERSION}.apk"
+          else
+            OUT="RootBatteryMonitor-${VERSION}-debug.apk"
+          fi
+          cp "$SRC" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "将要发布：$OUT（来源 $SRC）"
+          ls -lh "$OUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "${{ steps.apk.outputs.path }}" \
+            --title "Root Battery Monitor ${GITHUB_REF_NAME}" \
+            --notes-file RELEASE-NOTES.md \
+            --verify-tag
