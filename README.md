@@ -41,7 +41,11 @@
 
 ## 安装
 
-从 [Releases](https://github.com/CaiGit1/RootBatteryMonitor/releases) 下载 APK，或：
+从 [Releases](https://github.com/CaiGit1/RootBatteryMonitor/releases) 下载 APK，在手机上点击安装。
+
+首次安装需允许「安装未知来源应用」，装好后打开应用并授予 root 权限。
+
+也可以用 adb：
 
 ```bash
 adb install -r RootBatteryMonitor-v1.3.0-release.apk
