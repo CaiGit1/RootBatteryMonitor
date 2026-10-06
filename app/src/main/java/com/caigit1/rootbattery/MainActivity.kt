@@ -8,13 +8,16 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +38,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
@@ -58,6 +62,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,9 +74,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -85,14 +94,31 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Android 15（targetSdk 35）已强制 edge-to-edge。显式调用并交由系统按当前明暗
-        // 主题决定状态栏/导航栏图标颜色，避免深色模式下图标看不清。
+        // Android 15（targetSdk 35）已强制 edge-to-edge。
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
         setContent {
-            RootBatteryMonitorTheme {
-                AppRoot()
+            val vm: BatteryMonitorViewModel = viewModel(factory = BatteryMonitorViewModel.Factory)
+            val ui by vm.uiState.collectAsState()
+
+            // 状态栏/导航栏图标必须跟随**应用**的明暗设置，而不是系统设置。
+            // 若强制浅色时仍按系统（深色）取图标色，就会出现亮色顶栏配浅色图标、完全看不见。
+            val darkTheme = resolveDarkTheme(LocalContext.current, ui.themeMode)
+            LaunchedEffect(darkTheme) {
+                val barStyle = if (darkTheme) {
+                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT
+                    )
+                }
+                enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+            }
+
+            RootBatteryMonitorTheme(themeMode = ui.themeMode) {
+                AppRoot(vm, ui)
             }
         }
     }
@@ -115,10 +141,7 @@ private val PAGE_TITLES = listOf("概览", "详情", "曲线", "设置")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun AppRoot() {
-    val vm: BatteryMonitorViewModel = viewModel(factory = BatteryMonitorViewModel.Factory)
-    val ui by vm.uiState.collectAsState()
-
+private fun AppRoot(vm: BatteryMonitorViewModel, ui: BatteryMonitorUiState) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { PAGE_TITLES.size })
@@ -128,19 +151,31 @@ private fun AppRoot() {
         ActivityResultContracts.StartActivityForResult()
     ) { vm.refreshOverlayPermission() }
 
+    // 「关于」是设置页下的子页面：用局部状态做钻取即可，不必为此引入导航库
+    var aboutVisible by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Root Battery Monitor") },
+                title = { Text(if (aboutVisible) "关于" else "Root Battery Monitor") },
+                navigationIcon = {
+                    if (aboutVisible) {
+                        IconButton(onClick = { aboutVisible = false }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    }
+                },
                 actions = {
-                    Text(
-                        formatInterval(ui.intervalMs),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
-                    IconButton(onClick = vm::refreshNow) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "立即刷新")
+                    if (!aboutVisible) {
+                        Text(
+                            formatInterval(ui.intervalMs),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                        IconButton(onClick = vm::refreshNow) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "立即刷新")
+                        }
                     }
                 }
             )
@@ -148,43 +183,60 @@ private fun AppRoot() {
         bottomBar = {
             NavigationBar {
                 PAGE_TITLES.forEachIndexed { index, title ->
+                    val tabSelected = !aboutVisible && pagerState.currentPage == index
                     NavigationBarItem(
-                        selected = pagerState.currentPage == index,
-                        onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                        icon = { TabIcon(index, pagerState.currentPage == index) },
+                        selected = tabSelected,
+                        // 处于子页面时点任意标签都先退回主分页
+                        onClick = {
+                            aboutVisible = false
+                            scope.launch { pagerState.animateScrollToPage(index) }
+                        },
+                        icon = { TabIcon(index, tabSelected) },
                         label = { Text(title) }
                     )
                 }
             }
         }
     ) { padding ->
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) { page ->
-            when (page) {
-                0 -> OverviewPage(ui, onRefresh = vm::refreshNow)
-                1 -> DetailsPage(ui, onSelfCheck = vm::runSelfCheck)
-                2 -> ChartsPage(ui)
-                else -> SettingsPage(
-                    ui = ui,
-                    onIntervalChange = vm::setIntervalMs,
-                    onAlertsChange = vm::setAlertsEnabled,
-                    onNotificationChange = vm::setNotificationEnabled,
-                    onOverlayChange = vm::setOverlayEnabled,
-                    onOverlayFieldChange = vm::setOverlayField,
-                    onSelfCheck = vm::runSelfCheck,
-                    onOpenOverlaySettings = {
-                        overlayPermissionLauncher.launch(
-                            Intent(
-                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                Uri.parse("package:${context.packageName}")
+        if (aboutVisible) {
+            AboutPage(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            )
+        } else {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) { page ->
+                when (page) {
+                    0 -> OverviewPage(ui, onRefresh = vm::refreshNow)
+                    1 -> DetailsPage(ui, onSelfCheck = vm::runSelfCheck)
+                    2 -> ChartsPage(ui)
+                    else -> SettingsPage(
+                        ui = ui,
+                        onIntervalChange = vm::setIntervalMs,
+                        onAlertsChange = vm::setAlertsEnabled,
+                        onNotificationChange = vm::setNotificationEnabled,
+                        onOverlayChange = vm::setOverlayEnabled,
+                        onOverlayFieldChange = vm::setOverlayField,
+                        onOverlayAlphaChange = vm::setOverlayAlpha,
+                        onOverlayBackgroundChange = vm::setOverlayBackground,
+                        onThemeModeChange = vm::setThemeMode,
+                        onSelfCheck = vm::runSelfCheck,
+                        onOpenAbout = { aboutVisible = true },
+                        onOpenOverlaySettings = {
+                            overlayPermissionLauncher.launch(
+                                Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}")
+                                )
                             )
-                        )
-                    }
-                )
+                        }
+                    )
+                }
             }
         }
     }
@@ -250,7 +302,7 @@ private fun OverviewPage(ui: BatteryMonitorUiState, onRefresh: () -> Unit) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StatTile("电流", snap?.currentText ?: "--", Modifier.weight(1f))
-                    StatTile("功率 V×I", snap?.computedPowerText ?: "--", Modifier.weight(1f))
+                    StatTile("功率", snap?.computedPowerText ?: "--", Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     StatTile("健康度", snap?.healthPercentText ?: "--", Modifier.weight(1f))
@@ -268,6 +320,7 @@ private fun OverviewPage(ui: BatteryMonitorUiState, onRefresh: () -> Unit) {
                     Text("状态", style = MaterialTheme.typography.titleSmall)
                     MetricRow("充电状态", snap?.status ?: "--")
                     MetricRow("充电类型", snap?.chargeType ?: "--")
+                    MetricRow("充电协议", snap?.charger?.usbTypeShort ?: "--")
                     MetricRow("供电节点", snap?.charger?.node ?: "--")
                     MetricRow("供电电压/电流", snap?.charger?.let { "${it.voltageText} / ${it.currentText}" } ?: "--")
                     MetricRowStacked("数据源", snap?.sourcePath ?: "--")
@@ -404,15 +457,18 @@ private fun DetailsPage(ui: BatteryMonitorUiState, onSelfCheck: () -> Unit) {
         item { SelfCheckCard(ui.selfChecks) }
 
         item {
-            ExpandableSection("电压 / 功率", initiallyExpanded = true) {
-                MetricRow("VOLTAGE_NOW", snap?.voltageText ?: "--")
-                MetricRow("VOLTAGE_OCV", snap?.ocvText ?: "--")
-                MetricRow("VOLTAGE_MAX", snap?.voltageMaxText ?: "--")
-                MetricRow("CURRENT_NOW", snap?.currentText ?: "--")
-                MetricRow("POWER_NOW（内核）", snap?.powerNowText ?: "--")
-                MetricRow("POWER_AVG（内核）", snap?.powerAvgText ?: "--")
-                MetricRow("自算功率 V×I", snap?.computedPowerText ?: "--")
-                Hint("电流为内核原始符号（各 ROM 正负约定不同）；POWER_NOW 为内核上报值，部分机型与 V×I 差异很大。")
+            ExpandableSection("电压 / 电流 / 功率", initiallyExpanded = true) {
+                MetricRow("电压", snap?.voltageText ?: "--")
+                MetricRow("开路电压 OCV", snap?.ocvText ?: "--")
+                MetricRow("满电电压上限", snap?.voltageMaxText ?: "--")
+                MetricRow("电流", snap?.currentText ?: "--")
+                MetricRow("功率", snap?.computedPowerText ?: "--")
+                Hint(
+                    "电流与功率保留内核原始符号，正负表示方向（本机为「负 = 充电」，各 ROM 约定相反）。\n" +
+                        "功率由「电压 × 电流」实时计算。内核上报的 POWER_NOW / POWER_AVG 在本机恒为 " +
+                        "10000 / 5000 的固定占位值，与实际相差百倍，故不予采用；" +
+                        "其原始值仍可在下方「原始 uevent」中查看。"
+                )
             }
         }
 
@@ -432,7 +488,7 @@ private fun DetailsPage(ui: BatteryMonitorUiState, onSelfCheck: () -> Unit) {
                 MetricRowStacked("节点", c?.node ?: "--")
                 MetricRow("在线", c?.onlineText ?: "--")
                 MetricRow("类型", c?.type ?: "--")
-                MetricRowStacked("USB 类型", c?.usbType ?: "--")
+                MetricRowStacked("充电协议", c?.protocol?.activeText ?: "--")
                 MetricRow("输入电压", c?.voltageText ?: "--")
                 MetricRow("输入电流", c?.currentText ?: "--")
                 MetricRow("电流上限", c?.currentMaxText ?: "--")
@@ -629,7 +685,7 @@ private fun ChartsPage(ui: BatteryMonitorUiState) {
         }
         item {
             MetricChart(
-                title = "功率 V×I",
+                title = "功率",
                 unit = "mW",
                 values = points.map { it.powerMw?.toFloat() },
                 color = semantic.chartPower
@@ -725,6 +781,9 @@ private fun MetricChart(
             val hi = maxV + span * 0.08f
             val range = (hi - lo).takeIf { it > 0f } ?: 1f
             val divisions = 4
+            // 绘制前压缩点数：屏幕宽只有 ~800px，600 个点画不出更多信息，
+            // 却会让每帧的描边代价成倍上升（滚动曲线页时最明显）。
+            val drawn = remember(values) { downsampleForDraw(values) }
 
             Row(modifier = Modifier.height(150.dp)) {
                 Column(
@@ -743,6 +802,7 @@ private fun MetricChart(
                 }
                 Spacer(Modifier.width(6.dp))
                 Canvas(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                    // 网格只有 5 条，继续用 drawLine
                     for (i in 0..divisions) {
                         val y = size.height * i / divisions
                         drawLine(
@@ -753,33 +813,44 @@ private fun MetricChart(
                         )
                     }
 
-                    val step = size.width / (values.size - 1).coerceAtLeast(1)
-                    var prev: Offset? = null
-                    values.forEachIndexed { index, raw ->
+                    // 曲线合成**一条** Path 再 drawPath，而不是逐段 drawLine。
+                    // 逐段画时 Skia 要为每一段单独做带圆头端点的描边细分，
+                    // 600 点 × 4 张图 = 2400 次；合并后只剩 4 次绘制调用。
+                    val step = size.width / (drawn.size - 1).coerceAtLeast(1)
+                    val path = Path()
+                    var started = false
+                    drawn.forEachIndexed { index, raw ->
                         if (raw == null) {
-                            prev = null // 断线，不补 0
+                            started = false // 断线，不补 0
                             return@forEachIndexed
                         }
                         val x = index * step
                         val y = size.height * (1f - (raw - lo) / range)
-                        val current = Offset(x, y)
-                        prev?.let {
-                            drawLine(
-                                color = color,
-                                start = it,
-                                end = current,
-                                strokeWidth = 3f,
-                                cap = StrokeCap.Round
-                            )
+                        if (started) {
+                            path.lineTo(x, y)
+                        } else {
+                            path.moveTo(x, y)
+                            started = true
                         }
-                        prev = current
                     }
+                    drawPath(
+                        path = path,
+                        color = color,
+                        style = Stroke(
+                            width = 3f,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round
+                        )
+                    )
                 }
             }
 
             Spacer(Modifier.height(6.dp))
             Text(
-                "纵轴单位 $unit · ${present.size} 个有效点 / 共 ${values.size} 个",
+                buildString {
+                    append("纵轴单位 $unit · ${present.size} 个有效点 / 共 ${values.size} 个")
+                    if (drawn.size < values.size) append("（绘图压缩至 ${drawn.size} 点）")
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = labelColor
             )
@@ -797,12 +868,18 @@ private fun SettingsPage(
     onNotificationChange: (Boolean) -> Unit,
     onOverlayChange: (Boolean) -> Unit,
     onOverlayFieldChange: (OverlayField, Boolean) -> Unit,
+    onOverlayAlphaChange: (Float) -> Unit,
+    onOverlayBackgroundChange: (OverlayBackground) -> Unit,
+    onThemeModeChange: (ThemeMode) -> Unit,
     onSelfCheck: () -> Unit,
+    onOpenAbout: () -> Unit,
     onOpenOverlaySettings: () -> Unit
 ) {
     val sliderSteps =
         ((SettingsStore.MAX_INTERVAL_MS - SettingsStore.MIN_INTERVAL_MS) / SettingsStore.STEP_INTERVAL_MS - 1)
             .toInt()
+    val alphaSteps =
+        ((1f - SettingsStore.MIN_OVERLAY_ALPHA) / SettingsStore.OVERLAY_ALPHA_STEP - 1).roundToInt()
 
     LazyColumn(
         modifier = Modifier
@@ -851,6 +928,30 @@ private fun SettingsPage(
                     } else {
                         Hint("步进 0.1s，范围 0.2s – 5.0s。设置会自动持久化并同步给后台服务。")
                     }
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("深色模式", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ThemeMode.entries.forEach { mode ->
+                            FilterChip(
+                                selected = ui.themeMode == mode,
+                                onClick = { onThemeModeChange(mode) },
+                                label = { Text(mode.label) }
+                            )
+                        }
+                    }
+                    Hint(
+                        "独立于系统设置：系统是深色时也可让本应用保持浅色。\n" +
+                            "悬浮窗的明暗与状态栏图标会同步跟随此设置。"
+                    )
                 }
             }
         }
@@ -912,6 +1013,70 @@ private fun SettingsPage(
             Card {
                 Column(
                     modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("悬浮窗外观", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "不透明度 ${(ui.overlayAlpha * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Text(
+                        "背景取色（Material You）",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OverlayBackground.entries.forEach { style ->
+                            FilterChip(
+                                selected = ui.overlayBackground == style,
+                                onClick = { onOverlayBackgroundChange(style) },
+                                label = { Text(style.label) }
+                            )
+                        }
+                    }
+                    Hint(
+                        "Material You 的「中性灰」是 surface 系列，只带极淡的壁纸色调；" +
+                            "要明显的壁纸配色请选主色 / 次色 / 第三色。"
+                    )
+
+                    Slider(
+                        value = ui.overlayAlpha,
+                        onValueChange = onOverlayAlphaChange,
+                        valueRange = SettingsStore.MIN_OVERLAY_ALPHA..1f,
+                        steps = alphaSteps
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "${(SettingsStore.MIN_OVERLAY_ALPHA * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Text("100%", style = MaterialTheme.typography.labelSmall)
+                    }
+
+                    Hint(
+                        "背景取自 Material You 动态色板（跟随壁纸），并随明暗模式切换。\n" +
+                            "调低可减少对下方内容的遮挡；文字始终保持不透明，避免低不透明度下读不清。"
+                    )
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("其他", style = MaterialTheme.typography.titleSmall)
@@ -938,6 +1103,33 @@ private fun SettingsPage(
                             "• 应用未声明 INTERNET 权限，不联网、不上传\n" +
                             "• 高频刷新会明显增加耗电，长时间挂悬浮窗建议用 1s 以上间隔",
                         style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
+        item {
+            Card {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenAbout)
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("关于", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "作者、项目地址与许可证",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        "›",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -995,6 +1187,154 @@ private fun FlowChips(
     }
 }
 
+// ══════════════════════════ 关于 ══════════════════════════
+
+private const val PROJECT_URL = "https://github.com/CaiGit1/RootBatteryMonitor"
+
+/** 「关于」子页面。由设置页底部入口进入，顶栏提供返回。 */
+@Composable
+private fun AboutPage(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+
+    // 直接问 PackageManager，省得为读一个版本号去打开 buildConfig 生成
+    val version = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "—"
+    }
+
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // 头像随 APK 打包（res/drawable-nodpi），不走网络 —— 因此无需
+                        // INTERNET 权限，也不违背「不联网、不上传」的声明。
+                        Image(
+                            painter = painterResource(R.drawable.ic_author),
+                            contentDescription = "作者头像",
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .border(
+                                    1.5.dp,
+                                    MaterialTheme.colorScheme.outlineVariant,
+                                    CircleShape
+                                )
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "Root Battery Monitor",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "版本 $version",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Text(
+                        "仅支持已 root 设备的电池监控应用。通过只读读取内核 power_supply 的 " +
+                            "uevent 节点，展示电量、温度、电压、电流、功率、容量损耗与充电器状态。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("作者与许可", style = MaterialTheme.typography.titleSmall)
+                    MetricRow("作者", "Anna Yanami (CaiGit1)")
+                    MetricRow("GitHub", "CaiGit1")
+                    MetricRow("许可证", "MIT")
+                    MetricRow("版权", "© 2026 Anna Yanami")
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("链接", style = MaterialTheme.typography.titleSmall)
+                    LinkRow("项目主页", "CaiGit1/RootBatteryMonitor") {
+                        uriHandler.openUri(PROJECT_URL)
+                    }
+                    LinkRow("问题反馈", "Issues") {
+                        uriHandler.openUri("$PROJECT_URL/issues")
+                    }
+                    LinkRow("安全政策", "SECURITY.md") {
+                        uriHandler.openUri("$PROJECT_URL/blob/main/SECURITY.md")
+                    }
+                    LinkRow("许可证全文", "LICENSE (MIT)") {
+                        uriHandler.openUri("$PROJECT_URL/blob/main/LICENSE")
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("权限与安全边界", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "• 所有读取均在 root 上下文完成，仅执行只读命令，不写入 sysfs\n" +
+                            "• 未声明 INTERNET 权限，不联网、不上传任何数据\n" +
+                            "• 悬浮窗需要「显示在其他应用上层」，由用户手动授予",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
+        item { Spacer(Modifier.height(8.dp)) }
+    }
+}
+
+@Composable
+private fun LinkRow(label: String, value: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = MaterialTheme.colorScheme.primary)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 // ══════════════════════════ 通用 ══════════════════════════
 
 @Composable
@@ -1048,3 +1388,42 @@ private fun fmtValue(v: Float): String =
 
 private fun fmtAxis(v: Float, range: Float): String =
     if (range < 10f) "%.1f".format(v) else v.roundToInt().toString()
+
+/** 绘制前的目标桶数。每桶最多产出 2 个点（最小 + 最大），故实际点数 ≤ 2×此值。 */
+private const val MAX_CHART_BUCKETS = 90
+
+/**
+ * 绘制前的点数压缩。
+ *
+ * 用「按桶取最小 / 最大」而不是等距抽样：电流存在瞬时尖峰，等距抽样会把尖峰整段吃掉，
+ * 而每桶同时保留最小值和最大值能保住曲线的包络形状。
+ */
+private fun downsampleForDraw(
+    values: List<Float?>,
+    maxBuckets: Int = MAX_CHART_BUCKETS
+): List<Float?> {
+    if (values.size <= maxBuckets * 2) return values
+
+    val bucketSize = (values.size + maxBuckets - 1) / maxBuckets
+    val out = ArrayList<Float?>(maxBuckets * 2)
+
+    var i = 0
+    while (i < values.size) {
+        val end = minOf(i + bucketSize, values.size)
+        var minV: Float? = null
+        var maxV: Float? = null
+
+        for (j in i until end) {
+            val v = values[j] ?: continue
+            val lo0 = minV
+            if (lo0 == null || v < lo0) minV = v
+            val hi0 = maxV
+            if (hi0 == null || v > hi0) maxV = v
+        }
+
+        minV?.let { out.add(it) }
+        maxV?.let { if (it != minV) out.add(it) }
+        i = end
+    }
+    return out
+}

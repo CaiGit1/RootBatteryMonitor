@@ -35,7 +35,11 @@ class BatteryMonitorService : Service() {
         val intervalMs: Long = SettingsStore.DEFAULT_INTERVAL_MS,
         val notificationEnabled: Boolean = false,
         val overlayEnabled: Boolean = false,
-        val overlayFields: Set<OverlayField> = OverlayField.DEFAULT
+        val overlayFields: Set<OverlayField> = OverlayField.DEFAULT,
+        val overlayAlpha: Float = SettingsStore.DEFAULT_OVERLAY_ALPHA,
+        val overlayBackground: OverlayBackground = OverlayBackground.DEFAULT,
+        /** 悬浮窗的明暗跟随应用的深色模式设置，而不是无条件跟随系统 */
+        val themeMode: ThemeMode = ThemeMode.DEFAULT
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -75,7 +79,10 @@ class BatteryMonitorService : Service() {
             intervalMs = store.intervalMs,
             notificationEnabled = store.notificationEnabled,
             overlayEnabled = store.overlayEnabled,
-            overlayFields = store.overlayFields
+            overlayFields = store.overlayFields,
+            overlayAlpha = store.overlayAlpha,
+            overlayBackground = store.overlayBackground,
+            themeMode = store.themeMode
         )
 
         config.value = if (intent == null) {
@@ -92,7 +99,17 @@ class BatteryMonitorService : Service() {
                     ?.mapNotNull { runCatching { OverlayField.valueOf(it) }.getOrNull() }
                     ?.toSet()
                     ?.takeIf { it.isNotEmpty() }
-                    ?: fallback.overlayFields
+                    ?: fallback.overlayFields,
+                overlayAlpha = intent.getFloatExtra(EXTRA_OVERLAY_ALPHA, fallback.overlayAlpha)
+                    .coerceIn(SettingsStore.MIN_OVERLAY_ALPHA, 1f),
+                overlayBackground = intent.getStringExtra(EXTRA_OVERLAY_BG)
+                    ?.let { name ->
+                        runCatching { OverlayBackground.valueOf(name) }.getOrNull()
+                    }
+                    ?: fallback.overlayBackground,
+                themeMode = intent.getStringExtra(EXTRA_THEME_MODE)
+                    ?.let { name -> runCatching { ThemeMode.valueOf(name) }.getOrNull() }
+                    ?: fallback.themeMode
             )
         }
         return START_STICKY
@@ -114,7 +131,7 @@ class BatteryMonitorService : Service() {
         // show()/hide() 内部会把操作派发到主线程，并自行记录失败原因；
         // 这里不再根据返回值打印「缺少权限」——那会把线程异常之类的真实原因掩盖成权限问题。
         if (cfg.overlayEnabled) {
-            overlay.show(cfg.overlayFields)
+            overlay.show(cfg.overlayFields, cfg.overlayAlpha, cfg.overlayBackground, cfg.themeMode)
         } else {
             overlay.hide()
         }
@@ -220,6 +237,9 @@ class BatteryMonitorService : Service() {
         private const val EXTRA_NOTIFICATION = "notification_enabled"
         private const val EXTRA_OVERLAY = "overlay_enabled"
         private const val EXTRA_OVERLAY_FIELDS = "overlay_fields"
+        private const val EXTRA_OVERLAY_ALPHA = "overlay_alpha"
+        private const val EXTRA_OVERLAY_BG = "overlay_background"
+        private const val EXTRA_THEME_MODE = "theme_mode"
 
         private const val NOTIFY_MIN_INTERVAL_MS = 1000L
         private const val NOTIFY_ERROR_MIN_INTERVAL_MS = 10_000L
@@ -230,11 +250,17 @@ class BatteryMonitorService : Service() {
             intervalMs: Long,
             notificationEnabled: Boolean,
             overlayEnabled: Boolean,
-            overlayFields: Set<OverlayField>
+            overlayFields: Set<OverlayField>,
+            overlayAlpha: Float,
+            overlayBackground: OverlayBackground,
+            themeMode: ThemeMode
         ): Intent = Intent(context, BatteryMonitorService::class.java).apply {
             putExtra(EXTRA_INTERVAL_MS, intervalMs)
             putExtra(EXTRA_NOTIFICATION, notificationEnabled)
             putExtra(EXTRA_OVERLAY, overlayEnabled)
+            putExtra(EXTRA_OVERLAY_ALPHA, overlayAlpha)
+            putExtra(EXTRA_OVERLAY_BG, overlayBackground.name)
+            putExtra(EXTRA_THEME_MODE, themeMode.name)
             putStringArrayListExtra(
                 EXTRA_OVERLAY_FIELDS,
                 ArrayList(overlayFields.map { it.name })

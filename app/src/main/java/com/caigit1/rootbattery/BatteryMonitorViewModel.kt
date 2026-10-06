@@ -34,6 +34,12 @@ data class BatteryMonitorUiState(
     val notificationEnabled: Boolean = false,
     val overlayEnabled: Boolean = false,
     val overlayFields: Set<OverlayField> = OverlayField.DEFAULT,
+    /** 深色模式策略 */
+    val themeMode: ThemeMode = ThemeMode.DEFAULT,
+    /** 悬浮窗背景不透明度 */
+    val overlayAlpha: Float = SettingsStore.DEFAULT_OVERLAY_ALPHA,
+    /** 悬浮窗背景取色角色 */
+    val overlayBackground: OverlayBackground = OverlayBackground.DEFAULT,
     val overlayPermissionGranted: Boolean = false
 ) {
     val serviceRunning: Boolean get() = notificationEnabled || overlayEnabled
@@ -72,6 +78,9 @@ class BatteryMonitorViewModel(
                 notificationEnabled = settings.notificationEnabled,
                 overlayEnabled = settings.overlayEnabled,
                 overlayFields = settings.overlayFields,
+                themeMode = settings.themeMode,
+                overlayAlpha = settings.overlayAlpha,
+                overlayBackground = settings.overlayBackground,
                 overlayPermissionGranted = canDrawOverlays()
             )
         }
@@ -158,6 +167,31 @@ class BatteryMonitorViewModel(
         syncService()
     }
 
+    /** 悬浮窗背景不透明度，0.2 – 1.0。 */
+    fun setOverlayAlpha(alpha: Float) {
+        val clamped = alpha.coerceIn(SettingsStore.MIN_OVERLAY_ALPHA, 1f)
+        if (clamped == _uiState.value.overlayAlpha) return
+        settings.overlayAlpha = clamped
+        _uiState.update { it.copy(overlayAlpha = clamped) }
+        syncService()
+    }
+
+    /** 悬浮窗背景取色角色（Material You）。 */
+    fun setOverlayBackground(background: OverlayBackground) {
+        if (background == _uiState.value.overlayBackground) return
+        settings.overlayBackground = background
+        _uiState.update { it.copy(overlayBackground = background) }
+        syncService()
+    }
+
+    /** 深色模式策略。悬浮窗的明暗也走这个设置，因此需要同步给后台服务。 */
+    fun setThemeMode(mode: ThemeMode) {
+        if (mode == _uiState.value.themeMode) return
+        settings.themeMode = mode
+        _uiState.update { it.copy(themeMode = mode) }
+        syncService()
+    }
+
     /** 从系统设置返回后刷新权限状态 */
     fun refreshOverlayPermission() {
         _uiState.update { it.copy(overlayPermissionGranted = canDrawOverlays()) }
@@ -200,7 +234,10 @@ class BatteryMonitorViewModel(
                         intervalMs = s.intervalMs,
                         notificationEnabled = s.notificationEnabled,
                         overlayEnabled = s.overlayEnabled,
-                        overlayFields = s.overlayFields
+                        overlayFields = s.overlayFields,
+                        overlayAlpha = s.overlayAlpha,
+                        overlayBackground = s.overlayBackground,
+                        themeMode = s.themeMode
                     )
                 )
             } else {

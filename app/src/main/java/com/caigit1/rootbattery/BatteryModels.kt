@@ -26,6 +26,94 @@ data class ChargerInfo(
         false -> "未连接"
         null -> "--"
     }
+
+    /** 充电协议（已解析方括号中的当前生效项）。lazy：避免每次读取都重新解析。 */
+    val protocol: UsbProtocol by lazy { parseUsbProtocol(usbType) }
+
+    /** 充电协议简称，适合悬浮窗这类紧凑位置 */
+    val usbTypeShort: String get() = protocol.active
+
+    /** 充电协议可读全称 */
+    val usbTypeText: String get() = protocol.activeText
+}
+
+/**
+ * `POWER_SUPPLY_USB_TYPE` 的解析结果。
+ * 界面**只展示当前生效的协议**（[active] / [activeText]）；[supported] 仅作为解析产物保留，
+ * 完整原始串仍可在「原始 uevent」卡片里看到。
+ */
+data class UsbProtocol(
+    /** 当前生效协议的短名，如 SDP / PD / DCP */
+    val active: String,
+    /** 当前生效协议的原始标识符 */
+    val activeRaw: String?,
+    /** 该口支持的全部协议标识符 */
+    val supported: List<String>
+) {
+    /** 只讲当前协议 —— 不把支持列表铺到界面上 */
+    val activeText: String
+        get() = activeRaw?.let { describeUsbProtocol(it) } ?: "--"
+}
+
+/**
+ * 解析 `POWER_SUPPLY_USB_TYPE`。
+ *
+ * **该属性不是单值**：内核把「本口支持的全部类型」以空格分隔列出，并用方括号标出
+ * **当前生效**的那一项。本机实测：
+ * ```
+ * Unknown [SDP] DCP CDP ACA C PD PD_DRP PD_PPS BrickID
+ * ```
+ * 之前当成单值直接显示，界面上就会出现一整行无意义的标识符串（实测截图里那一长条），
+ * 而且会把 WRAP_CONTENT 的悬浮窗撑宽。必须取方括号里的那一项。
+ */
+internal fun parseUsbProtocol(raw: String?): UsbProtocol {
+    val text = raw?.trim().orEmpty()
+    if (text.isEmpty()) return UsbProtocol("--", null, emptyList())
+
+    val active = Regex("""\[([^\]]+)]""").find(text)?.groupValues?.get(1)?.trim()
+    val supported = text
+        .replace(Regex("""\[([^\]]+)]"""), " $1 ")
+        .split(Regex("\\s+"))
+        .filter { it.isNotBlank() }
+        .distinct()
+
+    return UsbProtocol(
+        active = active?.let { shortUsbProtocol(it) } ?: "--",
+        activeRaw = active,
+        supported = supported
+    )
+}
+
+private fun shortUsbProtocol(key: String): String = when (key.uppercase()) {
+    "SDP", "DCP", "CDP", "ACA", "PD" -> key.uppercase()
+    "C" -> "Type-C"
+    "PD_DRP" -> "PD DRP"
+    "PD_PPS" -> "PD PPS"
+    "BRICKID" -> "BrickID"
+    "HVDCP" -> "HVDCP"
+    "HVDCP_3" -> "HVDCP3"
+    "HVDCP_3P5" -> "HVDCP3.5"
+    "PROPRIETARY" -> "私有协议"
+    "UNKNOWN", "NONE", "" -> "--"
+    else -> key
+}
+
+private fun describeUsbProtocol(key: String): String = when (key.uppercase()) {
+    "SDP" -> "SDP 标准下行口（电脑 USB，上限 500mA）"
+    "DCP" -> "DCP 专用充电口（常见 1.5A）"
+    "CDP" -> "CDP 充电下行口（可充电 + 数据 1.5A）"
+    "ACA" -> "ACA 配件充电适配器"
+    "C" -> "USB Type-C 口"
+    "PD" -> "USB-PD 功率传输"
+    "PD_DRP" -> "USB-PD 双角色（可供电也可受电）"
+    "PD_PPS" -> "USB-PD PPS 可编程电源"
+    "BRICKID" -> "BrickID（充电器私有识别）"
+    "HVDCP" -> "HVDCP 高压专用充电（QC 类）"
+    "HVDCP_3" -> "HVDCP 3.0 高压专用充电"
+    "HVDCP_3P5" -> "HVDCP 3.5 高压专用充电"
+    "PROPRIETARY" -> "厂商私有快充协议"
+    "UNKNOWN", "NONE", "" -> "未知"
+    else -> key
 }
 
 data class BatterySnapshot(
@@ -52,8 +140,9 @@ data class BatterySnapshot(
     val voltageOcvMv: Int? = null,
     val voltageMaxMv: Int? = null,
     val currentNowMa: Int? = null,
-    val powerNowMw: Int? = null,
-    val powerAvgMw: Int? = null,
+    // 刻意不解析 POWER_NOW / POWER_AVG：实测机型上内核恒返回 10000 与 5000
+    // （即 10W / 5W 的固定占位值），与 V×I 自算结果相差百倍，属无效数据。
+    // 展示它反而误导用户，故不进入任何界面；原始值仍可在「原始 uevent」卡片查看。
 
     // ── 容量与寿命 ──
     val chargeFullMah: Int? = null,
@@ -94,22 +183,20 @@ data class BatterySnapshot(
     val voltageText: String get() = voltageNowMv?.let { "$it mV" } ?: "--"
     val ocvText: String get() = voltageOcvMv?.let { "$it mV" } ?: "--"
     val voltageMaxText: String get() = voltageMaxMv?.let { "$it mV" } ?: "--"
-    val currentText: String get() = currentNowMa?.let { "$it mA" } ?: "--"
-    val powerNowText: String get() = powerNowMw?.let { "$it mW" } ?: "--"
-    val powerAvgText: String get() = powerAvgMw?.let { "$it mW" } ?: "--"
+    val currentText: String get() = currentNowMa?.let { formatSigned(it, "mA") } ?: "--"
     val chargeFullText: String get() = chargeFullMah?.let { "$it mAh" } ?: "--"
     val chargeFullDesignText: String get() = chargeFullDesignMah?.let { "$it mAh" } ?: "--"
     val chargeCounterText: String get() = chargeCounterRaw?.let { "$it（原值）" } ?: "--"
 
-    /** 由 V×I 推算的功率，用于与内核 POWER_NOW 交叉校验（本机实测两者差异很大） */
+    /** 由 V×I 推算的功率。不取绝对值：内核用电流正负表示方向，取绝对值会丢掉方向信息。 */
     val computedPowerMw: Int?
         get() {
             val v = voltageNowMv ?: return null
             val i = currentNowMa ?: return null
-            // 注意单位：mV × mA = 10⁻⁶ W = µW，必须再 ÷1000 才是 mW
-            return (kotlin.math.abs(v.toLong() * i) / 1000L).toInt()
+            // 单位：mV × mA = 10⁻⁶ W = µW，必须再 ÷1000 才是 mW
+            return (v.toLong() * i / 1000L).toInt()
         }
-    val computedPowerText: String get() = computedPowerMw?.let { "$it mW" } ?: "--"
+    val computedPowerText: String get() = computedPowerMw?.let { formatSigned(it, "mW") } ?: "--"
     val constantChargeCurrentText: String get() = constantChargeCurrentMa?.let { "$it mA" } ?: "--"
     val chargeControlLimitText: String
         get() {
@@ -154,6 +241,14 @@ fun BatterySnapshot.toTrendPoint(): TrendPoint = TrendPoint(
 
 internal fun fmt1(v: Double): String = ((v * 10).roundToInt() / 10.0).toString()
 
+/**
+ * 带显式符号的数值格式化。
+ * 内核用电流/功率的正负表示方向（不同 ROM 约定相反，本机为「负=充电」），
+ * 正值若不加 "+" 就无法一眼看出方向，因此这里显式标注。
+ */
+internal fun formatSigned(value: Int, unit: String): String =
+    if (value > 0) "+$value $unit" else "$value $unit"
+
 /** 秒 → 可读时长；内核用 -1 / 0xFFFF(65535) 表示未知，统一显示为 -- */
 internal fun formatDuration(seconds: Long?): String {
     if (seconds == null || seconds <= 0) return "--"
@@ -190,16 +285,53 @@ data class SelfCheckItem(
     val detail: String
 )
 
-/** 悬浮窗可选的显示字段，由用户在设置页自行勾选。 */
-enum class OverlayField(val label: String) {
+/**
+ * 深色模式策略。
+ *
+ * 注意：这不是「跟随系统」一个开关就够 —— 用户可能希望系统是深色但本应用保持浅色
+ * （或反之）。强制模式还必须同步驱动状态栏图标颜色，否则会出现亮色顶栏配浅色图标、
+ * 图标看不见的问题。
+ */
+enum class ThemeMode(val label: String) {
+    SYSTEM("跟随系统"),
+    LIGHT("浅色"),
+    DARK("深色");
+
+    companion object {
+        val DEFAULT = SYSTEM
+    }
+}
+
+/**
+ * 悬浮窗背景的取色角色。
+ *
+ * 为什么需要这个选择：Material You 的 `surface` / `surfaceContainer*` 系列是**中性色** ——
+ * 它们只带极淡的壁纸色调（深色下约 `#2B2930`），看上去就是「黑灰」。
+ * 真正携带壁纸色度的是 `primary` / `secondary` / `tertiary` 及其 container。
+ * 因此这里把选择权交给用户，默认用带色度的主色，而不是让人误以为取色失效。
+ */
+enum class OverlayBackground(val label: String) {
+    SURFACE("中性灰"),
+    PRIMARY("主色"),
+    SECONDARY("次色"),
+    TERTIARY("第三色");
+
+    companion object {
+        val DEFAULT = PRIMARY
+    }
+}
+
+/** 悬浮窗可选的显示字段，由用户在设置页自行勾选。 */enum class OverlayField(val label: String) {
     LEVEL("电量"),
     TEMPERATURE("温度"),
     VOLTAGE("电压"),
     CURRENT("电流"),
+    /** 自算功率（电压×电流）。内核 POWER_NOW 实测无效，已不再作为选项。 */
     POWER("功率"),
-    COMPUTED_POWER("V×I"),
     STATUS("状态"),
     CHARGE_TYPE("充电类型"),
+    /** 充电协议：由供电节点的 POWER_SUPPLY_USB_TYPE 解析（PD / DCP / CDP / HVDCP …） */
+    USB_TYPE("充电协议"),
     HEALTH("健康度"),
     CYCLE_COUNT("循环次数"),
     CHARGER("充电器");
@@ -209,10 +341,10 @@ enum class OverlayField(val label: String) {
         TEMPERATURE -> s.temperatureText
         VOLTAGE -> s.voltageText
         CURRENT -> s.currentText
-        POWER -> s.powerNowText
-        COMPUTED_POWER -> s.computedPowerText
+        POWER -> s.computedPowerText
         STATUS -> s.status ?: "--"
         CHARGE_TYPE -> s.chargeType ?: "--"
+        USB_TYPE -> s.charger?.usbTypeShort ?: "--"
         HEALTH -> s.healthPercentText
         CYCLE_COUNT -> s.cycleCount?.toString() ?: "--"
         CHARGER -> s.charger?.node ?: "--"

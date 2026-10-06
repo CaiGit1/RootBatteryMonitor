@@ -316,8 +316,8 @@ private object UeventParser {
         voltageOcvMv = scaled(v, "POWER_SUPPLY_VOLTAGE_OCV", 1000),
         voltageMaxMv = scaled(v, "POWER_SUPPLY_VOLTAGE_MAX", 1000),
         currentNowMa = scaled(v, "POWER_SUPPLY_CURRENT_NOW", 1000),
-        powerNowMw = scaled(v, "POWER_SUPPLY_POWER_NOW", 1000),
-        powerAvgMw = scaled(v, "POWER_SUPPLY_POWER_AVG", 1000),
+        // POWER_NOW / POWER_AVG 不解析：实测机型上内核恒返回 10000 / 5000 的固定占位值，
+        // 与自算功率相差百倍，属无效数据。原始值仍在「原始 uevent」中原样可见。
 
         chargeFullMah = scaled(v, "POWER_SUPPLY_CHARGE_FULL", 1000),
         chargeFullDesignMah = scaled(v, "POWER_SUPPLY_CHARGE_FULL_DESIGN", 1000),

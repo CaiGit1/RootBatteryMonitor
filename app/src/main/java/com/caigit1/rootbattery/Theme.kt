@@ -1,7 +1,10 @@
 package com.caigit1.rootbattery
 
+import android.content.Context
+import android.content.res.Configuration
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -66,12 +69,13 @@ val LocalSemanticColors = staticCompositionLocalOf { LightSemantics }
 
 @Composable
 fun RootBatteryMonitorTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
     /** Android 12+ 跟随壁纸取色（Material You）。MIUI / HyperOS 同样支持。 */
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
+    val darkTheme = resolveDarkTheme(context, themeMode)
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -81,8 +85,42 @@ fun RootBatteryMonitorTheme(
     }
 
     CompositionLocalProvider(
-        LocalSemanticColors provides if (darkTheme) DarkSemantics else LightSemantics
+        LocalSemanticColors provides semanticColorsFor(darkTheme)
     ) {
         MaterialTheme(colorScheme = colorScheme, content = content)
+    }
+}
+
+// ─────────────────── 非 Compose 环境（悬浮窗 Service）用的取色入口 ───────────────────
+
+internal fun semanticColorsFor(darkTheme: Boolean): SemanticColors =
+    if (darkTheme) DarkSemantics else LightSemantics
+
+/** 在非 Compose 环境判断系统是否深色。 */
+internal fun isNightMode(context: Context): Boolean =
+    (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+        Configuration.UI_MODE_NIGHT_YES
+
+/** 把用户选择的 [ThemeMode] 解析成最终的明暗结果。 */
+internal fun resolveDarkTheme(context: Context, mode: ThemeMode): Boolean = when (mode) {
+    ThemeMode.SYSTEM -> isNightMode(context)
+    ThemeMode.LIGHT -> false
+    ThemeMode.DARK -> true
+}
+
+/**
+ * 在非 Compose 环境取 Material You 配色。
+ *
+ * `dynamicDarkColorScheme` / `dynamicLightColorScheme` 本身是**普通函数**（不是 @Composable），
+ * 可以直接在 Service 里调用，从而保证悬浮窗与主界面取到完全一致的色板，
+ * 不必再依赖 `DynamicColors.wrapContextIfAvailable` 那套 XML 主题反射。
+ */
+internal fun materialYouScheme(context: Context, darkTheme: Boolean): ColorScheme {
+    val dynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    return when {
+        dynamicAvailable && darkTheme -> dynamicDarkColorScheme(context)
+        dynamicAvailable -> dynamicLightColorScheme(context)
+        darkTheme -> darkColorScheme()
+        else -> lightColorScheme()
     }
 }
