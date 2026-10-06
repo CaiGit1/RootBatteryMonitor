@@ -26,8 +26,8 @@ android {
         applicationId = "com.caigit1.rootbattery"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
 
     signingConfigs {
@@ -80,6 +80,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.core)
 
   implementation("com.google.android.material:material:1.12.0")
  debugImplementation(libs.androidx.compose.ui.tooling)

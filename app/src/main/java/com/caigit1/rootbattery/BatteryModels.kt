@@ -100,6 +100,7 @@ data class BatterySnapshot(
     val chargeFullText: String get() = chargeFullMah?.let { "$it mAh" } ?: "--"
     val chargeFullDesignText: String get() = chargeFullDesignMah?.let { "$it mAh" } ?: "--"
     val chargeCounterText: String get() = chargeCounterRaw?.let { "$it（原值）" } ?: "--"
+
     /** 由 V×I 推算的功率，用于与内核 POWER_NOW 交叉校验（本机实测两者差异很大） */
     val computedPowerMw: Int?
         get() {
@@ -127,6 +128,30 @@ data class BatterySnapshot(
     val timeToEmptyText: String get() = formatDuration(timeToEmptySeconds)
 }
 
+/**
+ * 图表用的轻量采样点。
+ * 刻意只存绘图需要的几个数值，不保存整份 raw map —— 0.2s 刷新下最多留存 600 个点，
+ * 若每点都带 26 项 uevent 映射，内存会无谓膨胀。
+ */
+data class TrendPoint(
+    val timestampMs: Long,
+    val levelPercent: Int?,
+    val temperatureCelsius: Double?,
+    val voltageMv: Int?,
+    val currentMa: Int?,
+    val powerMw: Int?
+)
+
+fun BatterySnapshot.toTrendPoint(): TrendPoint = TrendPoint(
+    timestampMs = timestampMs,
+    levelPercent = levelPercent,
+    temperatureCelsius = temperatureCelsius,
+    voltageMv = voltageNowMv,
+    currentMa = currentNowMa,
+    // 图表用自算功率而非内核 POWER_NOW：本机实测内核值（10 W）与 V×I（约 0.6 W）相差百倍
+    powerMw = computedPowerMw
+)
+
 internal fun fmt1(v: Double): String = ((v * 10).roundToInt() / 10.0).toString()
 
 /** 秒 → 可读时长；内核用 -1 / 0xFFFF(65535) 表示未知，统一显示为 -- */
@@ -145,6 +170,7 @@ enum class MonitorErrorType {
     EMPTY_RESPONSE,
     COMMAND_FAILURE,
     SERVICE_START_FAILED,
+    OVERLAY_PERMISSION_MISSING,
     UNKNOWN
 }
 
@@ -163,3 +189,36 @@ data class SelfCheckItem(
     val ok: Boolean,
     val detail: String
 )
+
+/** 悬浮窗可选的显示字段，由用户在设置页自行勾选。 */
+enum class OverlayField(val label: String) {
+    LEVEL("电量"),
+    TEMPERATURE("温度"),
+    VOLTAGE("电压"),
+    CURRENT("电流"),
+    POWER("功率"),
+    COMPUTED_POWER("V×I"),
+    STATUS("状态"),
+    CHARGE_TYPE("充电类型"),
+    HEALTH("健康度"),
+    CYCLE_COUNT("循环次数"),
+    CHARGER("充电器");
+
+    fun textOf(s: BatterySnapshot): String = when (this) {
+        LEVEL -> s.levelPercent?.let { "$it%" } ?: "--"
+        TEMPERATURE -> s.temperatureText
+        VOLTAGE -> s.voltageText
+        CURRENT -> s.currentText
+        POWER -> s.powerNowText
+        COMPUTED_POWER -> s.computedPowerText
+        STATUS -> s.status ?: "--"
+        CHARGE_TYPE -> s.chargeType ?: "--"
+        HEALTH -> s.healthPercentText
+        CYCLE_COUNT -> s.cycleCount?.toString() ?: "--"
+        CHARGER -> s.charger?.node ?: "--"
+    }
+
+    companion object {
+        val DEFAULT: Set<OverlayField> = setOf(LEVEL, TEMPERATURE, VOLTAGE, CURRENT)
+    }
+}

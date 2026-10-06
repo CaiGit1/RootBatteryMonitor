@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Android 13 (API 33) 起通知为运行时权限，前台服务的常驻通知需要它才能显示 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 悬浮窗：在其他应用上层显示电池信息。
+         这是特殊权限，需要在系统设置里由用户手动授予（Settings.ACTION_MANAGE_OVERLAY_PERMISSION）。 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
