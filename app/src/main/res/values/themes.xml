@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.RootBatteryMonitor" parent="Theme.Material3.DayNight.NoActionBar" />
+    <!--
+      parent 已是 DayNight，窗口底色会自动跟随系统深色开关。
+      额外两件事：
+        1. windowBackground 指向带 values-night 变体的颜色资源，避免冷启动 / 最近任务
+           缩略图在深色模式下闪白。
+        2. forceDarkAllowed=false —— 本应用已原生支持深色，必须关掉系统的"强制深色"
+           （MIUI / HyperOS 的深色模式会做自动反色），否则会出现二次反转导致配色错乱。
+    -->
+    <style name="Theme.RootBatteryMonitor" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
 </resources>

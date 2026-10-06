@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -84,10 +85,13 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Android 15（targetSdk 35）已强制 edge-to-edge。显式调用并交由系统按当前明暗
+        // 主题决定状态栏/导航栏图标颜色，避免深色模式下图标看不清。
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
         setContent {
-            MaterialTheme {
+            RootBatteryMonitorTheme {
                 AppRoot()
             }
         }
@@ -291,7 +295,8 @@ private fun OverviewPage(ui: BatteryMonitorUiState, onRefresh: () -> Unit) {
 
 @Composable
 private fun RootStatusRow(rootReady: Boolean) {
-    val color = if (rootReady) Color(0xFF2E7D32) else Color(0xFFC62828)
+    val semantic = LocalSemanticColors.current
+    val color = if (rootReady) semantic.ok else semantic.error
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -501,6 +506,7 @@ private fun ExpandableSection(
 
 @Composable
 private fun SelfCheckCard(checks: List<SelfCheckItem>) {
+    val semantic = LocalSemanticColors.current
     Card {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -513,7 +519,7 @@ private fun SelfCheckCard(checks: List<SelfCheckItem>) {
             checks.forEach { check ->
                 Text(
                     "• ${check.title}：${if (check.ok) "通过" else "失败"}",
-                    color = if (check.ok) Color(0xFF1B5E20) else Color(0xFFC62828),
+                    color = if (check.ok) semantic.ok else semantic.error,
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
@@ -575,6 +581,7 @@ private fun RawUeventCard(raw: Map<String, String>) {
 
 @Composable
 private fun ChartsPage(ui: BatteryMonitorUiState) {
+    val semantic = LocalSemanticColors.current
     val points = ui.history
     val spanText = windowLabel(points)
     LazyColumn(
@@ -601,7 +608,7 @@ private fun ChartsPage(ui: BatteryMonitorUiState) {
                 title = "温度",
                 unit = "°C",
                 values = points.map { it.temperatureCelsius?.toFloat() },
-                color = Color(0xFFD32F2F)
+                color = semantic.chartTemperature
             )
         }
         item {
@@ -609,7 +616,7 @@ private fun ChartsPage(ui: BatteryMonitorUiState) {
                 title = "电压",
                 unit = "mV",
                 values = points.map { it.voltageMv?.toFloat() },
-                color = Color(0xFF1976D2)
+                color = semantic.chartVoltage
             )
         }
         item {
@@ -617,7 +624,7 @@ private fun ChartsPage(ui: BatteryMonitorUiState) {
                 title = "电流",
                 unit = "mA",
                 values = points.map { it.currentMa?.toFloat() },
-                color = Color(0xFF7B1FA2)
+                color = semantic.chartCurrent
             )
         }
         item {
@@ -625,7 +632,7 @@ private fun ChartsPage(ui: BatteryMonitorUiState) {
                 title = "功率 V×I",
                 unit = "mW",
                 values = points.map { it.powerMw?.toFloat() },
-                color = Color(0xFF00897B)
+                color = semantic.chartPower
             )
         }
 
@@ -992,10 +999,11 @@ private fun FlowChips(
 
 @Composable
 private fun ErrorBanner(message: String) {
-    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))) {
+    val semantic = LocalSemanticColors.current
+    Card(colors = CardDefaults.cardColors(containerColor = semantic.errorContainer)) {
         Text(
             text = "异常：$message",
-            color = Color(0xFFB71C1C),
+            color = semantic.onErrorContainer,
             modifier = Modifier.padding(12.dp)
         )
     }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 供 XML 主题使用的窗口底色，避免 Compose 首帧之前出现白闪 -->
+    <color name="window_background">#FFFBFE</color>
+</resources>
