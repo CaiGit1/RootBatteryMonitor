@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Gradle 依赖（含版本目录 gradle/libs.versions.toml 中的 AGP / Kotlin / Compose）
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      androidx:
+        patterns:
+          - "androidx.*"
+      kotlin:
+        patterns:
+          - "org.jetbrains.kotlin*"
+
+  # GitHub Actions（当前使用 actions/checkout@v4 与 actions/setup-java@v4）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns:
+          - "*"

@@ -1,5 +1,8 @@
 # Root Battery Monitor
 
+[![Android Build](https://github.com/CaiGit1/RootBatteryMonitor/actions/workflows/android-build.yml/badge.svg)](https://github.com/CaiGit1/RootBatteryMonitor/actions/workflows/android-build.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 一个仅支持 **已 root Android 设备** 的电池监控应用。通过 `su` 只读读取内核 `power_supply` 的 `uevent` 节点，在 Jetpack Compose 界面中展示电量、温度、电压、电流、功率、容量损耗、循环次数与充电器状态。
 
 > 数据**仅本地显示**：不上传、不联网、不写入 sysfs。
@@ -82,3 +85,12 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - 覆盖充电、放电、高温场景
 - 验证 root 未授权 / SELinux 拒绝 / 节点不存在时的 UI 提示
 - 用 `adb shell su -c cat /sys/class/power_supply/*/uevent` 与界面数值交叉核对
+
+## 许可证
+
+[MIT](LICENSE) © 2026 Anna Yanami (CaiGit1)
+
+## 安全
+
+本应用需要 root 权限。其权限使用边界（只读、不写 sysfs、无网络权限）与漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+
