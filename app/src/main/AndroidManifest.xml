@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14 (API 34) 起：声明了 foregroundServiceType 就必须同时声明对应的类型权限，
+         否则 startForeground() 抛 SecurityException 直接闪退。原工程缺这一条。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Android 13 (API 33) 起通知为运行时权限，前台服务的常驻通知需要它才能显示 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"

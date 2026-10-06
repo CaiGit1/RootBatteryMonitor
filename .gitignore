@@ -6,3 +6,11 @@ build
 
 # Ignore Kotlin plugin data
 .kotlin
+
+# 本机 SDK 路径（含绝对路径，不应入库）
+local.properties
+
+# 发布签名配置与密钥库（含口令，绝不入库）
+keystore.properties
+*.jks
+*.keystore

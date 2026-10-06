@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +24,15 @@ class BatteryMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForeground(NOTIFICATION_ID, baseNotification("正在读取电池信息"))
+        try {
+            startForeground(NOTIFICATION_ID, baseNotification("正在读取电池信息"))
+        } catch (t: Throwable) {
+            // 缺 FOREGROUND_SERVICE_DATA_SYNC 权限等情况下会抛 SecurityException。
+            // 不要让它直接打崩进程：停掉自己并把原因写进 logcat。
+            Log.e(TAG, "startForeground 失败，服务退出", t)
+            stopSelf()
+            return
+        }
 
         serviceScope.launch {
             while (true) {
@@ -76,6 +85,7 @@ class BatteryMonitorService : Service() {
     }
 
     companion object {
+        private const val TAG = "BatteryMonitorService"
         private const val CHANNEL_ID = "root_battery_monitor"
         private const val NOTIFICATION_ID = 20261004
     }

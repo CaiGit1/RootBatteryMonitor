@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,13 +83,27 @@ class BatteryMonitorViewModel(
     }
 
     fun setForegroundServiceEnabled(enabled: Boolean) {
-        _uiState.update { it.copy(serviceEnabled = enabled) }
         val context = getApplication<Application>()
         val intent = Intent(context, BatteryMonitorService::class.java)
-        if (enabled) {
-            context.startForegroundService(intent)
-        } else {
-            context.stopService(intent)
+        try {
+            if (enabled) {
+                ContextCompat.startForegroundService(context, intent)
+            } else {
+                context.stopService(intent)
+            }
+            _uiState.update { it.copy(serviceEnabled = enabled, error = null) }
+        } catch (t: Throwable) {
+            // 例：Android 14+ 缺 FOREGROUND_SERVICE_DATA_SYNC，或后台启动前台服务被系统拒绝。
+            // 原来这里不捕获异常，开关一拨就直接闪退。
+            _uiState.update {
+                it.copy(
+                    serviceEnabled = false,
+                    error = MonitorError(
+                        MonitorErrorType.SERVICE_START_FAILED,
+                        "前台服务启动失败：${t.message ?: t::class.java.simpleName}"
+                    )
+                )
+            }
         }
     }
 
