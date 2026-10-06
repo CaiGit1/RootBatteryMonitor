@@ -20,6 +20,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
+
+      # runner 镜像自带的 Android SDK 平台版本不固定，显式安装以保证构建可复现。
+      # 工程要求 compileSdk 35 / build-tools 34.0.0（AGP 8.6.0 默认值）。
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required SDK packages
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;34.0.0" "platform-tools"
 
       - name: Build Debug APK
         run: |
