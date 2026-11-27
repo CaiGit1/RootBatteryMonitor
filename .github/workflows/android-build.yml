@@ -40,14 +40,14 @@ jobs:
           echo "$SDK/platform-tools" >> "$GITHUB_PATH"
 
       # runner 镜像自带的 SDK 平台版本会随镜像漂移，而本工程要求
-      # compileSdk 35 / build-tools 34.0.0，缺包会直接构建失败，故显式装齐。
+      # compileSdk 37 / build-tools 37.0.0，缺包会直接构建失败，故显式装齐。
       - name: Install required SDK packages
         run: |
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           yes | sdkmanager --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
           sdkmanager --sdk_root="$SDK" \
-            "platforms;android-35" \
-            "build-tools;34.0.0" \
+            "platforms;android-37" \
+            "build-tools;37.0.0" \
             "platform-tools"
 
       # 环境快照：构建失败时能一眼区分「环境没装对」还是「代码编译不过」
