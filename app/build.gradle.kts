@@ -19,7 +19,7 @@ val hasReleaseKeystore = keystorePropsFile.exists() &&
 
 android {
     namespace = "com.caigit1.rootbattery"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.caigit1.rootbattery"
